@@ -1,0 +1,19 @@
+name = "Hexaly"
+uuid = "4e695617-bd00-4489-bcc8-8e79e7638cb7"
+version = "0.1.0"
+authors = ["Benoît Legat <benoit.legat@gmail.com>"]
+
+[deps]
+CondaPkg = "992eb4ea-22a4-4c89-a5bb-47a3300528ab"
+PythonCall = "6099a3de-0909-46bc-b1f4-468b9a2dfc0d"
+
+[compat]
+CondaPkg = "0.2"
+PythonCall = "0.9"
+julia = "1.6"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
