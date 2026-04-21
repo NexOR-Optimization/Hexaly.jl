@@ -6,7 +6,7 @@ function _info(model::Optimizer, key::MOI.VariableIndex)
 end
 
 function _make_var(model::Optimizer, variable::Py; is_integer::Bool = true)
-    index = CleverDicts.add_item(
+    index = MOI.Utilities.CleverDicts.add_item(
         model.variable_info,
         VariableInfo(MOI.VariableIndex(0), variable; is_integer = is_integer),
     )

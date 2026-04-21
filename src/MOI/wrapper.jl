@@ -43,7 +43,7 @@ end
 mutable struct Optimizer <: MOI.AbstractOptimizer
     inner::Py   # HexalyOptimizer
     model::Py   # HxModel
-    variable_info::CleverDicts.CleverDict{MOI.VariableIndex, VariableInfo}
+    variable_info::MOI.Utilities.CleverDicts.CleverDict{MOI.VariableIndex, VariableInfo}
     constraint_info::Dict{MOI.ConstraintIndex, ConstraintInfo}
     name::String
     objective_sense::MOI.OptimizationSense
@@ -66,7 +66,7 @@ mutable struct Optimizer <: MOI.AbstractOptimizer
         model = new()
         model.inner = raw_optimizer()
         model.model = model.inner.model
-        model.variable_info = CleverDicts.CleverDict{MOI.VariableIndex, VariableInfo}()
+        model.variable_info = MOI.Utilities.CleverDicts.CleverDict{MOI.VariableIndex, VariableInfo}()
         model.constraint_info = Dict{MOI.ConstraintIndex, ConstraintInfo}()
         model.name = ""
         model.objective_sense = MOI.FEASIBILITY_SENSE

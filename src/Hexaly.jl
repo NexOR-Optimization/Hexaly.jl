@@ -2,11 +2,7 @@ module Hexaly
 
 import CondaPkg
 using PythonCall
-import MathOptInterface
-
-const MOI = MathOptInterface
-const MOIU = MOI.Utilities
-const CleverDicts = MOIU.CleverDicts
+import MathOptInterface as MOI
 
 const hexaly_optimizer = PythonCall.pynew()
 
