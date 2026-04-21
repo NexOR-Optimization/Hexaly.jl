@@ -2,6 +2,11 @@ module Hexaly
 
 import CondaPkg
 using PythonCall
+import MathOptInterface
+
+const MOI = MathOptInterface
+const MOIU = MOI.Utilities
+const CleverDicts = MOIU.CleverDicts
 
 const hexaly_optimizer = PythonCall.pynew()
 
@@ -32,10 +37,35 @@ function version()
 end
 
 """
-    Optimizer()
+    has_license()::Bool
 
-Create a new `HexalyOptimizer` Python object.
+Return `true` if a Hexaly license is available (either via `HX_LICENSE_CONTENT`
+or a license file on disk).
 """
-Optimizer() = hexaly_optimizer.HexalyOptimizer()
+function has_license()
+    HxVersion = hexaly_optimizer.HxVersion
+    content = pyconvert(String, HxVersion.license_content)
+    if !isempty(content)
+        return true
+    end
+    path = pyconvert(String, HxVersion.license_path)
+    return isfile(path)
+end
+
+"""
+    raw_optimizer()
+
+Create a new raw `HexalyOptimizer` Python object. This is the low-level
+Hexaly Python API. For MOI/JuMP use, prefer [`Optimizer`](@ref).
+"""
+raw_optimizer() = hexaly_optimizer.HexalyOptimizer()
+
+include("MOI/wrapper.jl")
+include("MOI/parse.jl")
+include("MOI/wrapper_variables.jl")
+include("MOI/wrapper_constraints.jl")
+include("MOI/wrapper_constraints_singlevar.jl")
+include("MOI/wrapper_constraints_linear.jl")
+include("MOI/wrapper_constraints_cp.jl")
 
 end # module Hexaly
