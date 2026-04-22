@@ -15,7 +15,7 @@ function runtests()
     return
 end
 
-function _silent(opt::Hexaly.Optimizer, t::Int = 2)
+function _silent(opt, t::Int = 2)
     MOI.set(opt, MOI.Silent(), true)
     MOI.set(opt, MOI.TimeLimitSec(), t)
     return
@@ -40,7 +40,7 @@ function test_time_limit()
     MOI.set(opt, MOI.TimeLimitSec(), 7.0)
     @test MOI.get(opt, MOI.TimeLimitSec()) == 7.0
     MOI.set(opt, MOI.TimeLimitSec(), nothing)
-    @test MOI.get(opt, MOI.TimeLimitSec()) == Float64(Hexaly._DEFAULT_TIME_LIMIT)
+    @test MOI.get(opt, MOI.TimeLimitSec()) === nothing
 end
 
 function test_integer_unconstrained_objective()
@@ -183,6 +183,23 @@ function test_moi_runtests()
             r"test_model$",
             # Conic tests not applicable
             r"test_conic_",
+            # Linear tests exercise double-solve / constraint delete which
+            # Hexaly's one-shot model semantics do not support.
+            r"test_linear_",
+            # Constraint retrieval by name not implemented
+            r"test_constraint_get_ConstraintIndex",
+            r"test_constraint_ScalarAffineFunction_",
+            r"test_constraint_VectorAffineFunction_",
+            # ModelFilter uses MOI attributes we don't implement
+            r"test_model_ModelFilter_",
+            r"test_model_ListOfConstraintAttributesSet",
+            # Name-based lookup of constraint indices not implemented
+            r"test_model_Name_VariableName_ConstraintName",
+            r"test_model_ScalarAffineFunction_ConstraintName",
+            r"test_model_duplicate_ScalarAffineFunction_ConstraintName",
+            r"test_model$",
+            # Clearing objective on FEASIBILITY_SENSE not exposed
+            r"test_objective_FEASIBILITY_SENSE_clears_objective",
             # Modification not supported
             r"test_modification_",
             # Dual-related

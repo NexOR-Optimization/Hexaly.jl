@@ -1,7 +1,8 @@
 # CP constraints implemented as Hexaly expressions.
 
-# AllDifferent — `model.distinct(array)` returns a boolean expression that
-# holds iff all elements of the array are pairwise distinct.
+# AllDifferent — Hexaly's `distinct` on an array is an operator, not a
+# boolean constraint, so we encode AllDifferent as a conjunction of pairwise
+# `neq` expressions, which are boolean and can be constrained directly.
 
 function MOI.supports_constraint(
     ::Optimizer,
@@ -17,8 +18,16 @@ function _build_constraint(
     ::MOI.AllDifferent,
 )
     vars = _parse_to_vars(model, f)
-    arr = model.model.array(pylist(vars))
-    return model.model.distinct(arr)
+    m = model.model
+    n = length(vars)
+    if n <= 1
+        return m.create_constant(Py(1))
+    end
+    pairs = Py[]
+    for i in 1:n, j in (i + 1):n
+        push!(pairs, m.neq(vars[i], vars[j]))
+    end
+    return length(pairs) == 1 ? pairs[1] : m.and_(pairs...)
 end
 
 # Circuit — Hexaly uses list decision variables for circuits, but we can
@@ -46,21 +55,34 @@ function _build_constraint(
     vars = _parse_to_vars(model, f)
     m = model.model
     n = length(vars)
-    # next_arr[i] = x[i] (we build an array indexed 0..n-1, shifted by -1)
     # MOI: x[i] ∈ 1..n denotes successor (1-based).
-    # Hexaly: build `next0[i] = x[i] - 1` so next0[i] ∈ 0..n-1.
+    # Hexaly at-indexing is 0-based, so we use `x[i] - 1`.
     shifted = Py[m.sub(v, Py(1)) for v in vars]
-    # All successors distinct
-    distinct_expr = m.distinct(m.array(pylist(shifted)))
-    # Reachability: starting at 0, applying `next` n times yields 0 and all
-    # intermediate nodes are distinct (guaranteed by distinct).
+    pairs = Py[]
+    # Domain: x[i] ∈ 1..n (implicitly required by MOI.Circuit)
+    for v in vars
+        push!(pairs, m.geq(v, Py(1)))
+        push!(pairs, m.leq(v, Py(n)))
+    end
+    # All successors distinct (pairwise neq).
+    for i in 1:n, j in (i + 1):n
+        push!(pairs, m.neq(shifted[i], shifted[j]))
+    end
+    # Reachability: walk the successor array starting at node 0 and require
+    # that after k < n steps the walk has not yet returned to 0, and after n
+    # steps it has. Combined with distinctness this rules out sub-cycles and
+    # forces a single Hamiltonian circuit.
     arr = m.array(pylist(shifted))
     cur = Py(0)
-    for _ in 1:n
+    for k in 1:n
         cur = m.at(arr, cur)
+        if k < n
+            push!(pairs, m.neq(cur, Py(0)))
+        else
+            push!(pairs, m.eq(cur, Py(0)))
+        end
     end
-    return_to_start = m.eq(cur, Py(0))
-    return m.and_(distinct_expr, return_to_start)
+    return length(pairs) == 1 ? pairs[1] : m.and_(pairs...)
 end
 
 # BinPacking — Hexaly models bin packing via load constraints.

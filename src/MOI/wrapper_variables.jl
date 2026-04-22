@@ -174,10 +174,17 @@ function MOI.set(
 end
 
 function MOI.get(model::Optimizer, ::Type{MOI.VariableIndex}, name::String)
+    found = MOI.VariableIndex[]
     for (k, info) in model.variable_info
         if info.name == name
-            return k
+            push!(found, k)
         end
     end
-    return nothing
+    if length(found) == 0
+        return nothing
+    elseif length(found) == 1
+        return found[1]
+    else
+        error("Multiple variables have name $name")
+    end
 end

@@ -24,7 +24,7 @@ function MOI.supports_constraint(
     ::Optimizer,
     ::Type{MOI.ScalarAffineFunction{T}},
     ::Type{S},
-) where {T <: Real, S <: Union{MOI.EqualTo{T}, MOI.LessThan{T}, MOI.GreaterThan{T}}}
+) where {T <: Union{Int, Float64}, S <: Union{MOI.EqualTo{T}, MOI.LessThan{T}, MOI.GreaterThan{T}}}
     return true
 end
 

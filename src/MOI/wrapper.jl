@@ -55,7 +55,7 @@ mutable struct Optimizer <: MOI.AbstractOptimizer
         MOI.ScalarAffineFunction{Int},
     }
     silent::Bool
-    time_limit::Int
+    time_limit::Union{Nothing, Float64}
     options::Dict{String, Any}
     termination_status::MOI.TerminationStatusCode
     primal_status::MOI.ResultStatusCode
@@ -73,30 +73,19 @@ mutable struct Optimizer <: MOI.AbstractOptimizer
         model.objective_function_type = nothing
         model.objective_function = nothing
         model.silent = false
-        model.time_limit = _DEFAULT_TIME_LIMIT
+        model.time_limit = nothing
         model.options = Dict{String, Any}()
         model.termination_status = MOI.OPTIMIZE_NOT_CALLED
         model.primal_status = MOI.NO_SOLUTION
         model.raw_status_string = ""
         model.solved = false
-        finalizer(_finalize, model)
         return model
     end
 end
 
-function _finalize(model::Optimizer)
-    try
-        model.inner.delete()
-    catch
-    end
-    return
-end
-
 function MOI.empty!(model::Optimizer)
-    try
-        model.inner.delete()
-    catch
-    end
+    # PythonCall handles ref-counting; the previous HexalyOptimizer is
+    # released when `model.inner` is reassigned.
     model.inner = raw_optimizer()
     model.model = model.inner.model
     empty!(model.variable_info)
@@ -154,15 +143,15 @@ end
 # Time limit
 
 MOI.supports(::Optimizer, ::MOI.TimeLimitSec) = true
-MOI.get(model::Optimizer, ::MOI.TimeLimitSec) = Float64(model.time_limit)
+MOI.get(model::Optimizer, ::MOI.TimeLimitSec) = model.time_limit
 
 function MOI.set(model::Optimizer, ::MOI.TimeLimitSec, ::Nothing)
-    model.time_limit = _DEFAULT_TIME_LIMIT
+    model.time_limit = nothing
     return
 end
 
 function MOI.set(model::Optimizer, ::MOI.TimeLimitSec, value::Real)
-    model.time_limit = max(1, round(Int, value))
+    model.time_limit = Float64(value)
     return
 end
 
@@ -250,7 +239,8 @@ end
 
 function _apply_params!(model::Optimizer)
     param = model.inner.param
-    param.time_limit = model.time_limit
+    tl = model.time_limit === nothing ? _DEFAULT_TIME_LIMIT : max(1, round(Int, model.time_limit))
+    param.time_limit = tl
     param.verbosity = model.silent ? 0 : 1
     for (k, v) in model.options
         try
@@ -286,6 +276,8 @@ end
 
 function MOI.optimize!(model::Optimizer)
     # Build objective (before closing the model).
+    # Hexaly requires at least one objective, even for feasibility problems,
+    # so we supply a constant zero objective when none is set.
     if model.objective_function !== nothing && model.objective_sense != MOI.FEASIBILITY_SENSE
         obj_expr = _build_objective_expression(model)
         if model.objective_sense == MOI.MIN_SENSE
@@ -293,6 +285,8 @@ function MOI.optimize!(model::Optimizer)
         else
             model.model.maximize(obj_expr)
         end
+    else
+        model.model.minimize(model.model.create_constant(Py(0)))
     end
 
     # Close the model (required before solving).

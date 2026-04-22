@@ -10,14 +10,20 @@ function MOI.supports_constraint(
     ::Optimizer,
     ::Type{MOI.VariableIndex},
     ::Type{S},
-) where {T <: Real, S <: Union{
+) where {T <: Union{Int, Float64}, S <: Union{
     MOI.EqualTo{T},
     MOI.LessThan{T},
     MOI.GreaterThan{T},
     MOI.Interval{T},
-    MOI.ZeroOne,
-    MOI.Integer,
 }}
+    return true
+end
+
+function MOI.supports_constraint(
+    ::Optimizer,
+    ::Type{MOI.VariableIndex},
+    ::Type{<:Union{MOI.ZeroOne, MOI.Integer}},
+)
     return true
 end
 
