@@ -5,15 +5,18 @@ authors = ["Benoît Legat <benoit.legat@gmail.com>"]
 
 [deps]
 CondaPkg = "992eb4ea-22a4-4c89-a5bb-47a3300528ab"
+MathOptInterface = "b8f27783-ece8-5eb3-8dc8-9495eed66fee"
 PythonCall = "6099a3de-0909-46bc-b1f4-468b9a2dfc0d"
 
 [compat]
 CondaPkg = "0.2"
+MathOptInterface = "1"
 PythonCall = "0.9"
 julia = "1.6"
 
 [extras]
+MathOptInterface = "b8f27783-ece8-5eb3-8dc8-9495eed66fee"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["Test"]
+test = ["MathOptInterface", "Test"]
