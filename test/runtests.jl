@@ -63,5 +63,6 @@ const HAS_LICENSE = Hexaly.has_license()
         include("sudoku.jl")
         include("knapsack.jl")
         include("tsp.jl")
+        include("vrp.jl")
     end
 end
