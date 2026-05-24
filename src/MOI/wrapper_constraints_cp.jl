@@ -132,3 +132,35 @@ function _build_constraint(
     end
     return length(and_terms) == 1 ? and_terms[1] : m.and_(and_terms...)
 end
+
+# Table — `x ∈ Table(tbl)` iff there exists a row r such that x[c] == tbl[r,c]
+# for all c. Encoded as `or_(and_(eq(x[c], tbl[r,c]) for c) for r)`.
+
+function MOI.supports_constraint(
+    ::Optimizer,
+    ::Type{MOI.VectorOfVariables},
+    ::Type{MOI.Table{T}},
+) where {T <: Real}
+    return true
+end
+
+function _build_constraint(
+    model::Optimizer,
+    f::MOI.VectorOfVariables,
+    s::MOI.Table{T},
+) where {T <: Real}
+    vars = _parse_to_vars(model, f)
+    m = model.model
+    tbl = s.table
+    nrows, ncols = size(tbl)
+    @assert ncols == length(vars)
+    if nrows == 0
+        return m.create_constant(Py(0))
+    end
+    row_exprs = Py[]
+    for r in 1:nrows
+        eqs = Py[m.eq(vars[c], Py(round(Int, tbl[r, c]))) for c in 1:ncols]
+        push!(row_exprs, length(eqs) == 1 ? eqs[1] : m.and_(eqs...))
+    end
+    return length(row_exprs) == 1 ? row_exprs[1] : m.or_(row_exprs...)
+end
