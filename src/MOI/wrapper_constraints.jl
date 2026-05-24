@@ -72,6 +72,20 @@ function MOI.add_constraint(
     return index
 end
 
+function MOI.add_constraint(
+    model::Optimizer,
+    f::MOI.VectorOfVariables,
+    s::MOI.Table{T},
+) where {T <: Real}
+    index = MOI.ConstraintIndex{MOI.VectorOfVariables, MOI.Table{T}}(
+        length(model.constraint_info) + 1,
+    )
+    expr = _build_constraint(model, f, s)
+    _add_hexaly_constraint!(model, expr)
+    model.constraint_info[index] = ConstraintInfo(index, expr, f, s)
+    return index
+end
+
 function MOI.get(
     model::Optimizer,
     ::MOI.ConstraintFunction,
