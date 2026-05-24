@@ -13,10 +13,3 @@ CondaPkg = "0.2"
 MathOptInterface = "1"
 PythonCall = "0.9"
 julia = "1.6"
-
-[extras]
-MathOptInterface = "b8f27783-ece8-5eb3-8dc8-9495eed66fee"
-Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
-
-[targets]
-test = ["MathOptInterface", "Test"]

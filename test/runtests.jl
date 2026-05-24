@@ -1,5 +1,5 @@
 using Hexaly
-using Hexaly.PythonCall
+using PythonCall
 using Test
 
 const CI = get(ENV, "CI", "false") == "true"
