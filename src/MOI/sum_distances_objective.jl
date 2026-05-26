@@ -4,10 +4,7 @@
 # Lowered to a Hexaly `model.sum(range, lambda)` expression that visits the
 # list cyclically.
 
-function MOI.supports(
-    ::Optimizer,
-    ::MOI.ObjectiveFunction{MOI.ScalarNonlinearFunction},
-)
+function MOI.supports(::Optimizer, ::MOI.ObjectiveFunction{MOI.ScalarNonlinearFunction})
     return true
 end
 
@@ -21,10 +18,7 @@ function MOI.set(
     return
 end
 
-function _build_sum_distances_expression(
-    model::Optimizer,
-    f::MOI.ScalarNonlinearFunction,
-)
+function _build_sum_distances_expression(model::Optimizer, f::MOI.ScalarNonlinearFunction)
     f.head == :sum_distances || error(
         "Hexaly: unsupported ScalarNonlinearFunction head `$(f.head)`. ",
         "Only `:sum_distances` is currently lowered.",
@@ -53,14 +47,13 @@ function _build_sum_distances_expression(
     elements = Py[_info(model, vi).variable for vi in nodes]
     seq = m.array(pylist(elements))
 
-    dist_rows = Py[pylist(round.(Int, dist_matrix[i, :])) for i in 1:n]
+    dist_rows = Py[pylist(round.(Int, dist_matrix[i, :])) for i = 1:n]
     dist_arr = m.array(pylist(dist_rows))
 
     c = m.count(seq)
-    inner = m.lambda_function(pyfunc(
-        i -> m.at(dist_arr, seq[i - 1], seq[i]);
-        wrap = "lambda f: lambda i: f(i)",
-    ))
-    closing = m.at(dist_arr, seq[c - 1], seq[0])
+    inner = m.lambda_function(
+        pyfunc(i -> m.at(dist_arr, seq[i-1], seq[i]); wrap = "lambda f: lambda i: f(i)"),
+    )
+    closing = m.at(dist_arr, seq[c-1], seq[0])
     return m.sum(m.range(1, c), inner) + closing
 end

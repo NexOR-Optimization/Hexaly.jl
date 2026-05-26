@@ -16,7 +16,7 @@ function MOI.add_constrained_variables(model::Optimizer, set::List)
     n = set.dimension
     hx_list = model.model.list(Py(n))
     indices = MOI.VariableIndex[]
-    for i in 0:(n - 1)
+    for i = 0:(n-1)
         elem = hx_list[Py(i)]
         info = VariableInfo(MOI.VariableIndex(0), elem; is_integer = true)
         info.lb = 0.0
@@ -25,9 +25,8 @@ function MOI.add_constrained_variables(model::Optimizer, set::List)
         _info(model, idx).index = idx
         push!(indices, idx)
     end
-    cindex = MOI.ConstraintIndex{MOI.VectorOfVariables, List}(
-        length(model.constraint_info) + 1,
-    )
+    cindex =
+        MOI.ConstraintIndex{MOI.VectorOfVariables,List}(length(model.constraint_info) + 1)
     model.constraint_info[cindex] = ConstraintInfo(
         cindex,
         hx_list,  # store the list expression itself so the objective handler can find it

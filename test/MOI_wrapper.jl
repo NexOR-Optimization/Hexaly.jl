@@ -122,7 +122,7 @@ function test_alldifferent()
     opt = Hexaly.Optimizer()
     _silent(opt)
     x = MOI.VariableIndex[]
-    for _ in 1:3
+    for _ = 1:3
         vi, _ = MOI.add_constrained_variable(opt, MOI.Interval(1, 3))
         push!(x, vi)
     end
@@ -144,10 +144,7 @@ function test_double_solve()
 end
 
 function test_moi_runtests()
-    model = MOI.instantiate(
-        Hexaly.Optimizer,
-        with_bridge_type = Float64,
-    )
+    model = MOI.instantiate(Hexaly.Optimizer, with_bridge_type = Float64)
     _silent(model)
     config = MOI.Test.Config(
         Float64;

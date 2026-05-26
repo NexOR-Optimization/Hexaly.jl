@@ -6,7 +6,7 @@ import MathOptInterface as MOI
     # Classic 0/1 knapsack:
     # items with (weight, value):
     weights = [2, 3, 4, 5]
-    values  = [3, 4, 5, 6]
+    values = [3, 4, 5, 6]
     capacity = 5
     # Optimal: pick items 1 (w=2,v=3) and 3 (w=4,v=5) → w=6 > 5, infeasible.
     # So pick items 1 and 2: w=5, v=7.
@@ -20,7 +20,7 @@ import MathOptInterface as MOI
     MOI.set(opt, MOI.TimeLimitSec(), 3)
 
     x = MOI.VariableIndex[]
-    for _ in 1:length(weights)
+    for _ = 1:length(weights)
         vi, _ = MOI.add_constrained_variable(opt, MOI.ZeroOne())
         push!(x, vi)
     end

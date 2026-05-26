@@ -16,12 +16,12 @@ import MathOptInterface as MOI
     MOI.set(opt, MOI.TimeLimitSec(), 5)
 
     x = Matrix{MOI.VariableIndex}(undef, 4, 4)
-    for i in 1:4, j in 1:4
+    for i = 1:4, j = 1:4
         x[i, j], _ = MOI.add_constrained_variable(opt, MOI.Interval(1, 4))
     end
 
     # Row + column AllDifferent
-    for i in 1:4
+    for i = 1:4
         MOI.add_constraint(opt, MOI.VectorOfVariables(x[i, :]), MOI.AllDifferent(4))
         MOI.add_constraint(opt, MOI.VectorOfVariables(x[:, i]), MOI.AllDifferent(4))
     end
@@ -33,7 +33,7 @@ import MathOptInterface as MOI
     end
 
     # Fix initial cells
-    for i in 1:4, j in 1:4
+    for i = 1:4, j = 1:4
         if init_sol[i, j] != 0
             MOI.add_constraint(opt, x[i, j], MOI.EqualTo(init_sol[i, j]))
         end
@@ -44,9 +44,9 @@ import MathOptInterface as MOI
     @test MOI.get(opt, MOI.TerminationStatus()) == MOI.OPTIMAL
     @test MOI.get(opt, MOI.PrimalStatus()) == MOI.FEASIBLE_POINT
 
-    sol = [MOI.get(opt, MOI.VariablePrimal(), x[i, j]) for i in 1:4, j in 1:4]
+    sol = [MOI.get(opt, MOI.VariablePrimal(), x[i, j]) for i = 1:4, j = 1:4]
     # Check all rows/cols/blocks
-    for i in 1:4
+    for i = 1:4
         @test sort(sol[i, :]) == [1, 2, 3, 4]
         @test sort(sol[:, i]) == [1, 2, 3, 4]
     end
