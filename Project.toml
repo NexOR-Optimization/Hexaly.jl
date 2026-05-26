@@ -11,7 +11,7 @@ PythonCall = "6099a3de-0909-46bc-b1f4-468b9a2dfc0d"
 
 [compat]
 CondaPkg = "0.2"
-JuMP = "1"
+JuMP = "=1.30.1" # Exact because we do type piracy
 MathOptInterface = "1"
 PythonCall = "0.9"
-julia = "1.9"
+julia = "1.10"

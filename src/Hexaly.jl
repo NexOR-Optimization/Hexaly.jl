@@ -77,6 +77,16 @@ JuMP._is_real(::Array{<:JuMP.AbstractVariableRef}) = true
 
 JuMP.moi_function(x::Array) = JuMP.moi_function.(x)
 
+# Needed so `JuMP.NonlinearOperator` recognises an array of variable refs as
+# a "JuMP-tainted" argument and dispatches to `GenericNonlinearExpr`
+# construction rather than calling `f.func(args...)` (which has no methods).
+function JuMP.variable_ref_type(
+    ::Type{JuMP.GenericNonlinearExpr},
+    ::AbstractArray{V},
+) where {V<:JuMP.AbstractVariableRef}
+    return V
+end
+
 include("MOI/wrapper.jl")
 include("MOI/parse.jl")
 include("MOI/wrapper_variables.jl")
