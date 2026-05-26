@@ -3,6 +3,7 @@ module Hexaly
 import CondaPkg
 using PythonCall
 import MathOptInterface as MOI
+import JuMP
 
 const hexaly_optimizer = PythonCall.pynew()
 
@@ -56,6 +57,36 @@ Hexaly Python API. For MOI/JuMP use, prefer [`Optimizer`](@ref).
 """
 raw_optimizer() = hexaly_optimizer.HexalyOptimizer()
 
+"""
+    sum_distances(dist_matrix, nodes)
+
+Build a JuMP nonlinear expression representing the closed-tour cost over
+`nodes` using `dist_matrix` as edge weights. Defined in the
+`HexalyJuMPExt` extension; calling it requires JuMP to be loaded.
+"""
+function sum_distances end
+
+const op_sum_distances = JuMP.NonlinearOperator(sum_distances, :sum_distances)
+
+# Below are type piracy that can be removed once
+# https://github.com/jump-dev/JuMP.jl/pull/3451
+# is merged
+JuMP._is_real(::Array{<:Real}) = true
+
+JuMP._is_real(::Array{<:JuMP.AbstractVariableRef}) = true
+
+JuMP.moi_function(x::Array) = JuMP.moi_function.(x)
+
+# Needed so `JuMP.NonlinearOperator` recognises an array of variable refs as
+# a "JuMP-tainted" argument and dispatches to `GenericNonlinearExpr`
+# construction rather than calling `f.func(args...)` (which has no methods).
+function JuMP.variable_ref_type(
+    ::Type{JuMP.GenericNonlinearExpr},
+    ::AbstractArray{V},
+) where {V<:JuMP.AbstractVariableRef}
+    return V
+end
+
 include("MOI/wrapper.jl")
 include("MOI/parse.jl")
 include("MOI/wrapper_variables.jl")
@@ -63,5 +94,7 @@ include("MOI/wrapper_constraints.jl")
 include("MOI/wrapper_constraints_singlevar.jl")
 include("MOI/wrapper_constraints_linear.jl")
 include("MOI/wrapper_constraints_cp.jl")
+include("MOI/list.jl")
+include("MOI/sum_distances_objective.jl")
 
 end # module Hexaly

@@ -12,11 +12,7 @@ function MOI.supports_constraint(
     return true
 end
 
-function _build_constraint(
-    model::Optimizer,
-    f::MOI.VectorOfVariables,
-    ::MOI.AllDifferent,
-)
+function _build_constraint(model::Optimizer, f::MOI.VectorOfVariables, ::MOI.AllDifferent)
     vars = _parse_to_vars(model, f)
     m = model.model
     n = length(vars)
@@ -24,7 +20,7 @@ function _build_constraint(
         return m.create_constant(Py(1))
     end
     pairs = Py[]
-    for i in 1:n, j in (i + 1):n
+    for i = 1:n, j = (i+1):n
         push!(pairs, m.neq(vars[i], vars[j]))
     end
     return length(pairs) == 1 ? pairs[1] : m.and_(pairs...)
@@ -47,11 +43,7 @@ function MOI.supports_constraint(
     return true
 end
 
-function _build_constraint(
-    model::Optimizer,
-    f::MOI.VectorOfVariables,
-    s::MOI.Circuit,
-)
+function _build_constraint(model::Optimizer, f::MOI.VectorOfVariables, s::MOI.Circuit)
     vars = _parse_to_vars(model, f)
     m = model.model
     n = length(vars)
@@ -65,7 +57,7 @@ function _build_constraint(
         push!(pairs, m.leq(v, Py(n)))
     end
     # All successors distinct (pairwise neq).
-    for i in 1:n, j in (i + 1):n
+    for i = 1:n, j = (i+1):n
         push!(pairs, m.neq(shifted[i], shifted[j]))
     end
     # Reachability: walk the successor array starting at node 0 and require
@@ -74,7 +66,7 @@ function _build_constraint(
     # forces a single Hamiltonian circuit.
     arr = m.array(pylist(shifted))
     cur = Py(0)
-    for k in 1:n
+    for k = 1:n
         cur = m.at(arr, cur)
         if k < n
             push!(pairs, m.neq(cur, Py(0)))
@@ -93,7 +85,7 @@ function MOI.supports_constraint(
     ::Optimizer,
     ::Type{MOI.VectorOfVariables},
     ::Type{MOI.BinPacking{T}},
-) where {T <: Real}
+) where {T<:Real}
     return true
 end
 
@@ -101,7 +93,7 @@ function _build_constraint(
     model::Optimizer,
     f::MOI.VectorOfVariables,
     s::MOI.BinPacking{T},
-) where {T <: Real}
+) where {T<:Real}
     vars = _parse_to_vars(model, f)
     m = model.model
     weights = s.weights
@@ -121,9 +113,9 @@ function _build_constraint(
     # For each bin b (1..n_bins), sum_{i: x[i]==b} weights[i] ≤ capacity
     # Build using indicator: sum_i weights[i] * (x[i] == b) ≤ capacity
     and_terms = Py[]
-    for b in 1:n_bins
+    for b = 1:n_bins
         indicators = Py[]
-        for i in 1:n_items
+        for i = 1:n_items
             ind = m.eq(vars[i], Py(b))
             push!(indicators, m.prod(Py(round(Int, weights[i])), ind))
         end
@@ -140,7 +132,7 @@ function MOI.supports_constraint(
     ::Optimizer,
     ::Type{MOI.VectorOfVariables},
     ::Type{MOI.Table{T}},
-) where {T <: Real}
+) where {T<:Real}
     return true
 end
 
@@ -148,7 +140,7 @@ function _build_constraint(
     model::Optimizer,
     f::MOI.VectorOfVariables,
     s::MOI.Table{T},
-) where {T <: Real}
+) where {T<:Real}
     vars = _parse_to_vars(model, f)
     m = model.model
     tbl = s.table
@@ -158,8 +150,8 @@ function _build_constraint(
         return m.create_constant(Py(0))
     end
     row_exprs = Py[]
-    for r in 1:nrows
-        eqs = Py[m.eq(vars[c], Py(round(Int, tbl[r, c]))) for c in 1:ncols]
+    for r = 1:nrows
+        eqs = Py[m.eq(vars[c], Py(round(Int, tbl[r, c]))) for c = 1:ncols]
         push!(row_exprs, length(eqs) == 1 ? eqs[1] : m.and_(eqs...))
     end
     return length(row_exprs) == 1 ? row_exprs[1] : m.or_(row_exprs...)

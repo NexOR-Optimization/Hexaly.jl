@@ -22,7 +22,7 @@ function _make_var(
 )
     index = _make_var(model, variable; is_integer = is_integer)
     S = typeof(set)
-    return index, MOI.ConstraintIndex{MOI.VariableIndex, S}(index.value)
+    return index, MOI.ConstraintIndex{MOI.VariableIndex,S}(index.value)
 end
 
 _new_int(model::Optimizer, lb::Int, ub::Int) = model.model.int(Py(lb), Py(ub))
@@ -34,7 +34,7 @@ function MOI.supports_add_constrained_variable(
     ::Optimizer,
     ::Type{F},
 ) where {
-    F <: Union{
+    F<:Union{
         MOI.EqualTo{Int},
         MOI.LessThan{Int},
         MOI.GreaterThan{Int},
@@ -73,10 +73,7 @@ function MOI.add_constrained_variable(model::Optimizer, set::MOI.ZeroOne)
     return vindex, cindex
 end
 
-function MOI.add_constrained_variable(
-    model::Optimizer,
-    set::MOI.EqualTo{T},
-) where {T <: Real}
+function MOI.add_constrained_variable(model::Optimizer, set::MOI.EqualTo{T}) where {T<:Real}
     val = set.value
     if T <: Integer
         v = _new_int(model, Int(val), Int(val))
@@ -95,7 +92,7 @@ end
 function MOI.add_constrained_variable(
     model::Optimizer,
     set::MOI.GreaterThan{T},
-) where {T <: Real}
+) where {T<:Real}
     if T <: Integer
         lb = ceil(Int, set.lower)
         v = _new_int(model, lb, _DEFAULT_INT_UB)
@@ -112,7 +109,7 @@ end
 function MOI.add_constrained_variable(
     model::Optimizer,
     set::MOI.LessThan{T},
-) where {T <: Real}
+) where {T<:Real}
     if T <: Integer
         ub = floor(Int, set.upper)
         v = _new_int(model, _DEFAULT_INT_LB, ub)
@@ -129,7 +126,7 @@ end
 function MOI.add_constrained_variable(
     model::Optimizer,
     set::MOI.Interval{T},
-) where {T <: Real}
+) where {T<:Real}
     if T <: Integer
         lb = ceil(Int, set.lower)
         ub = floor(Int, set.upper)
@@ -156,12 +153,7 @@ end
 
 MOI.get(model::Optimizer, ::MOI.VariableName, v::MOI.VariableIndex) = _info(model, v).name
 
-function MOI.set(
-    model::Optimizer,
-    ::MOI.VariableName,
-    v::MOI.VariableIndex,
-    name::String,
-)
+function MOI.set(model::Optimizer, ::MOI.VariableName, v::MOI.VariableIndex, name::String)
     info = _info(model, v)
     info.name = name
     if !isempty(name)

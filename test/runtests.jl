@@ -41,9 +41,9 @@ const HAS_LICENSE = Hexaly.has_license()
 
             dist_matrix = model.array(dist)
 
-            obj = model.at(dist_matrix, cities[nb_cities - 1], cities[0])
-            for k in 1:(nb_cities - 1)
-                obj = obj + model.at(dist_matrix, cities[k - 1], cities[k])
+            obj = model.at(dist_matrix, cities[nb_cities-1], cities[0])
+            for k = 1:(nb_cities-1)
+                obj = obj + model.at(dist_matrix, cities[k-1], cities[k])
             end
             model.minimize(obj)
             model.close()
@@ -64,5 +64,6 @@ const HAS_LICENSE = Hexaly.has_license()
         include("knapsack.jl")
         include("tsp.jl")
         include("vrp.jl")
+        include("tsp_jump.jl")
     end
 end

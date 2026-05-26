@@ -10,7 +10,7 @@ end
 function _build_linear_expression(
     model::Optimizer,
     f::MOI.ScalarAffineFunction{T},
-) where {T <: Real}
+) where {T<:Real}
     f = MOI.Utilities.canonical(f)
     m = model.model
     terms = f.terms
@@ -39,7 +39,7 @@ end
 
 # Convert a numeric scalar to the Python representation Hexaly expects.
 # Integers are preserved to avoid unnecessary double-expressions.
-_py_number(::Type{T}, x) where {T <: Integer} = Py(round(Int, x))
+_py_number(::Type{T}, x) where {T<:Integer} = Py(round(Int, x))
 _py_number(::Type{T}, x) where {T} = Py(Float64(x))
 
 _py_int(x::Real) = Py(round(Int, x))
@@ -49,6 +49,8 @@ function _build_objective_expression(model::Optimizer)
     f = model.objective_function
     if f isa MOI.VariableIndex
         return _info(model, f).variable
+    elseif f isa MOI.ScalarNonlinearFunction
+        return _build_sum_distances_expression(model, f)
     else
         return _build_linear_expression(model, f)
     end
