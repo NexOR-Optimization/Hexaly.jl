@@ -18,10 +18,18 @@ function MOI.set(
     return
 end
 
+# Lower a `ScalarNonlinearFunction` whose root head is `:sum_distances`, or a
+# `:+` tree (sum of subexpressions) whose leaves are `:sum_distances` — the
+# shape JuMP produces when the user writes
+# `sum(Hexaly.op_sum_distances(...) for i in 1:n_trucks)`.
 function _build_sum_distances_expression(model::Optimizer, f::MOI.ScalarNonlinearFunction)
+    if f.head == :+
+        terms = [_build_sum_distances_expression(model, arg) for arg in f.args]
+        return reduce((a, b) -> a + b, terms)
+    end
     f.head == :sum_distances || error(
         "Hexaly: unsupported ScalarNonlinearFunction head `$(f.head)`. ",
-        "Only `:sum_distances` is currently lowered.",
+        "Only `:sum_distances` (optionally wrapped in `:+`) is currently lowered.",
     )
     length(f.args) == 2 || error(
         "Hexaly: `:sum_distances` expects 2 args (dist_matrix, nodes); got $(length(f.args)).",
@@ -38,22 +46,26 @@ function _build_sum_distances_expression(model::Optimizer, f::MOI.ScalarNonlinea
         "Hexaly: `:sum_distances` shape mismatch: dist_matrix is $(size(dist_matrix)), nodes has length $n.",
     )
 
-    # The Hexaly list expression is the Py object stored on the FIRST variable
-    # of the List set; all n MOI variables share the same backing list (since
-    # `add_constrained_variables(::List)` created them from `list[i]` slices).
-    # Recover the list by walking up to the parent — instead of relying on
-    # that, we rebuild the Hexaly list expression from the per-element refs.
     m = model.model
-    elements = Py[_info(model, vi).variable for vi in nodes]
-    seq = m.array(pylist(elements))
-
     dist_rows = Py[pylist(round.(Int, dist_matrix[i, :])) for i = 1:n]
     dist_arr = m.array(pylist(dist_rows))
+
+    # If every variable shares the same `parent_list` (the usual case when
+    # `nodes` is one column of a `Hexaly.Partition` or all of a `Hexaly.List`),
+    # use the underlying list directly so the cyclic sum runs over the list's
+    # *variable* count, not the static array length.
+    first_pl = _info(model, nodes[1]).parent_list
+    if first_pl !== nothing &&
+       all(_info(model, vi).parent_list === first_pl for vi in nodes)
+        seq = first_pl
+    else
+        seq = m.array(pylist(Py[_info(model, vi).variable for vi in nodes]))
+    end
 
     c = m.count(seq)
     inner = m.lambda_function(
         pyfunc(i -> m.at(dist_arr, seq[i-1], seq[i]); wrap = "lambda f: lambda i: f(i)"),
     )
-    closing = m.at(dist_arr, seq[c-1], seq[0])
+    closing = m.iif(c > 0, m.at(dist_arr, seq[c-1], seq[0]), Py(0))
     return m.sum(m.range(1, c), inner) + closing
 end
