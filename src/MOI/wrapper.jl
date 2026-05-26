@@ -53,6 +53,7 @@ mutable struct Optimizer <: MOI.AbstractOptimizer
         MOI.VariableIndex,
         MOI.ScalarAffineFunction{Float64},
         MOI.ScalarAffineFunction{Int},
+        MOI.ScalarNonlinearFunction,
     }
     silent::Bool
     time_limit::Union{Nothing, Float64}
@@ -363,6 +364,9 @@ function _evaluate_objective(model::Optimizer)
         info = _info(model, f)
         val = info.variable.value
         return info.is_integer ? pyconvert(Int, val) : pyconvert(Float64, val)
+    elseif f isa MOI.ScalarNonlinearFunction
+        # Hexaly's first objective expression carries the solved value.
+        return pyconvert(Float64, model.model.get_objective(Py(0)).value)
     else
         # ScalarAffineFunction
         T = typeof(f).parameters[1]

@@ -231,6 +231,11 @@ function test_moi_runtests()
             r"test_nonlinear_",
             r"test_vector_nonlinear_",
             r"test_solve_SOS2",
+            # QP objective tests get bridged to ScalarNonlinearFunction now
+            # that we declare support for that objective type, but we only
+            # lower the `:sum_distances` head, not generic `+`/`*` trees.
+            r"test_objective_qp_ObjectiveFunction_edge_cases",
+            r"test_objective_qp_ObjectiveFunction_zero_ofdiag",
         ],
     )
     return

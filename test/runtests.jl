@@ -64,5 +64,6 @@ const HAS_LICENSE = Hexaly.has_license()
         include("knapsack.jl")
         include("tsp.jl")
         include("vrp.jl")
+        include("tsp_jump.jl")
     end
 end

@@ -49,6 +49,8 @@ function _build_objective_expression(model::Optimizer)
     f = model.objective_function
     if f isa MOI.VariableIndex
         return _info(model, f).variable
+    elseif f isa MOI.ScalarNonlinearFunction
+        return _build_sum_distances_expression(model, f)
     else
         return _build_linear_expression(model, f)
     end

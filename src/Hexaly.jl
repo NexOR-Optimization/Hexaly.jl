@@ -56,6 +56,15 @@ Hexaly Python API. For MOI/JuMP use, prefer [`Optimizer`](@ref).
 """
 raw_optimizer() = hexaly_optimizer.HexalyOptimizer()
 
+"""
+    sum_distances(dist_matrix, nodes)
+
+Build a JuMP nonlinear expression representing the closed-tour cost over
+`nodes` using `dist_matrix` as edge weights. Defined in the
+`HexalyJuMPExt` extension; calling it requires JuMP to be loaded.
+"""
+function sum_distances end
+
 include("MOI/wrapper.jl")
 include("MOI/parse.jl")
 include("MOI/wrapper_variables.jl")
@@ -63,5 +72,7 @@ include("MOI/wrapper_constraints.jl")
 include("MOI/wrapper_constraints_singlevar.jl")
 include("MOI/wrapper_constraints_linear.jl")
 include("MOI/wrapper_constraints_cp.jl")
+include("MOI/list.jl")
+include("MOI/sum_distances_objective.jl")
 
 end # module Hexaly

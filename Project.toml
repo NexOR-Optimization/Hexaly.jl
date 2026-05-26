@@ -8,8 +8,15 @@ CondaPkg = "992eb4ea-22a4-4c89-a5bb-47a3300528ab"
 MathOptInterface = "b8f27783-ece8-5eb3-8dc8-9495eed66fee"
 PythonCall = "6099a3de-0909-46bc-b1f4-468b9a2dfc0d"
 
+[weakdeps]
+JuMP = "4076af6c-e467-56ae-b986-b466b2749572"
+
+[extensions]
+HexalyJuMPExt = "JuMP"
+
 [compat]
 CondaPkg = "0.2"
+JuMP = "1"
 MathOptInterface = "1"
 PythonCall = "0.9"
-julia = "1.6"
+julia = "1.9"
