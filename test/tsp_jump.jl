@@ -17,7 +17,7 @@ using Random
     set_time_limit_sec(model, 5)
 
     @variable(model, nodes[1:n] in Hexaly.List(n))
-    @objective(model, Min, Hexaly.sum_distances(dist, nodes))
+    @objective(model, Min, Hexaly.op_sum_distances(dist, nodes))
 
     optimize!(model)
 
