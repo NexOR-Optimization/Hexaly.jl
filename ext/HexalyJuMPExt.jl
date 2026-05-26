@@ -21,19 +21,13 @@ function Hexaly.sum_distances(
     )
 end
 
-# JuMP's default `_is_real` only accepts scalar leaves. We allow constant
-# numeric arrays and vectors of variable references so the args of the
-# `:sum_distances` expression pass JuMP's validation.
-JuMP._is_real(::AbstractArray{<:Real}) = true
-JuMP._is_real(::AbstractArray{<:JuMP.AbstractVariableRef}) = true
+# Below are type piracy that can be removed once
+# https://github.com/jump-dev/JuMP.jl/pull/3451
+# is merged
+JuMP._is_real(::Array{<:Real}) = true
 
-# Convert each arg of a `GenericNonlinearExpr` to its MOI form when the
-# objective is set. The default `moi_function` covers scalars; extend it for
-# the two array shapes we use as `sum_distances` args.
-JuMP.moi_function(x::AbstractArray{<:Real}) = x
+JuMP._is_real(::Array{<:JuMP.AbstractVariableRef}) = true
 
-function JuMP.moi_function(x::AbstractVector{<:JuMP.AbstractVariableRef})
-    return MOI.VariableIndex[JuMP.index(v) for v in x]
-end
+JuMP.moi_function(x::Array) = JuMP.moi_function.(x)
 
 end # module
