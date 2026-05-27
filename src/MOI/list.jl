@@ -15,6 +15,12 @@ end
 function MOI.add_constrained_variables(model::Optimizer, set::List)
     n = set.dimension
     hx_list = model.model.list(Py(n))
+    # `Hexaly.List(n)` semantically means "a permutation of `0:n-1`" — a
+    # bare `model.list(n)` only requires distinctness, with the length free
+    # between 0 and n. Force the length so the optimizer can't pick a
+    # shorter list (which is optimal under `sum_distances` since shorter
+    # closed tours have lower cost).
+    model.model.constraint(model.model.count(hx_list) == Py(n))
     indices = _add_list_variables!(model, hx_list, n)
     cindex =
         MOI.ConstraintIndex{MOI.VectorOfVariables,List}(length(model.constraint_info) + 1)

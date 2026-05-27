@@ -73,18 +73,15 @@ const op_sum_distances = JuMP.NonlinearOperator(sum_distances, :sum_distances)
 # is merged
 JuMP._is_real(::Array{<:Real}) = true
 
-JuMP._is_real(::Array{<:JuMP.AbstractVariableRef}) = true
+JuMP._is_real(::Array{<:JuMP.AbstractJuMPScalar}) = true
 
 JuMP.moi_function(x::Array) = JuMP.moi_function.(x)
 
-# Needed so `JuMP.NonlinearOperator` recognises an array of variable refs as
-# a "JuMP-tainted" argument and dispatches to `GenericNonlinearExpr`
-# construction rather than calling `f.func(args...)` (which has no methods).
 function JuMP.variable_ref_type(
     ::Type{JuMP.GenericNonlinearExpr},
-    ::AbstractArray{V},
-) where {V<:JuMP.AbstractVariableRef}
-    return V
+    ::AbstractArray{T},
+) where {T<:JuMP.AbstractJuMPScalar}
+    return JuMP.variable_ref_type(T)
 end
 
 include("MOI/wrapper.jl")
