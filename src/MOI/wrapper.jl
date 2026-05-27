@@ -11,7 +11,12 @@ const _DEFAULT_TIME_LIMIT = 10
 
 mutable struct VariableInfo
     index::MOI.VariableIndex
-    variable::Py  # Hexaly HxExpression (decision)
+    variable::Py  # Hexaly HxExpression (decision or list-element ref)
+    # When the variable is an element of a Hexaly `list` decision variable
+    # (e.g., via `Hexaly.List` or `Hexaly.Partition`), `parent_list` is that
+    # list expression. `_build_sum_distances_expression` uses it to access
+    # the underlying list's variable count and elements.
+    parent_list::Union{Nothing,Py}
     name::String
     lb::Union{Nothing,Float64}
     ub::Union{Nothing,Float64}
@@ -19,8 +24,22 @@ mutable struct VariableInfo
     is_integer::Bool
 end
 
-function VariableInfo(index::MOI.VariableIndex, variable::Py; is_integer::Bool = true)
-    return VariableInfo(index, variable, "", nothing, nothing, false, is_integer)
+function VariableInfo(
+    index::MOI.VariableIndex,
+    variable::Py;
+    is_integer::Bool = true,
+    parent_list::Union{Nothing,Py} = nothing,
+)
+    return VariableInfo(
+        index,
+        variable,
+        parent_list,
+        "",
+        nothing,
+        nothing,
+        false,
+        is_integer,
+    )
 end
 
 mutable struct ConstraintInfo
