@@ -47,9 +47,7 @@ function _solve_raw(inst)
     m = optimizer.model
     routes = [m.list(inst.n_customers) for _ = 1:inst.n_trucks]
     m.constraint(m.partition(pylist(routes)))
-    dist_arr = m.array(
-        pylist([pylist(inst.dist_matrix[i, :]) for i = 1:inst.n_customers]),
-    )
+    dist_arr = m.array(pylist([pylist(inst.dist_matrix[i, :]) for i = 1:inst.n_customers]))
     depot_arr = m.array(pylist(inst.dist_depot))
     route_dists = Py[]
     for k = 1:inst.n_trucks
@@ -93,8 +91,8 @@ function _solve_jump(inst)
         model,
         Min,
         sum(
-            Hexaly.op_sum_distances(inst.M, vcat(inst.depot, nodes[:, i], inst.depot))
-            for i = 1:inst.n_trucks
+            Hexaly.op_sum_distances(inst.M, vcat(inst.depot, nodes[:, i], inst.depot)) for
+            i = 1:inst.n_trucks
         ),
     )
     optimize!(model)

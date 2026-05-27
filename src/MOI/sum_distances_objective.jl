@@ -114,9 +114,7 @@ function _vector_affine_to_items(f::MOI.VectorAffineFunction)
     end
     items = Vector{Any}(undef, n)
     for i = 1:n
-        items[i] = _simplify_item(
-            MOI.ScalarAffineFunction(per_row[i], f.constants[i]),
-        )
+        items[i] = _simplify_item(MOI.ScalarAffineFunction(per_row[i], f.constants[i]))
     end
     return items
 end

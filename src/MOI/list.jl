@@ -24,12 +24,8 @@ function MOI.add_constrained_variables(model::Optimizer, set::List)
     indices = _add_list_variables!(model, hx_list, n)
     cindex =
         MOI.ConstraintIndex{MOI.VectorOfVariables,List}(length(model.constraint_info) + 1)
-    model.constraint_info[cindex] = ConstraintInfo(
-        cindex,
-        hx_list,
-        MOI.VectorOfVariables(indices),
-        set,
-    )
+    model.constraint_info[cindex] =
+        ConstraintInfo(cindex, hx_list, MOI.VectorOfVariables(indices), set)
     return indices, cindex
 end
 
@@ -100,11 +96,7 @@ function MOI.add_constrained_variables(model::Optimizer, set::Partition)
     cindex = MOI.ConstraintIndex{MOI.VectorOfVariables,Partition}(
         length(model.constraint_info) + 1,
     )
-    model.constraint_info[cindex] = ConstraintInfo(
-        cindex,
-        nothing,
-        MOI.VectorOfVariables(indices),
-        set,
-    )
+    model.constraint_info[cindex] =
+        ConstraintInfo(cindex, nothing, MOI.VectorOfVariables(indices), set)
     return indices, cindex
 end
