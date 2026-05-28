@@ -86,7 +86,7 @@ end
 
 function MOI.add_constrained_variables(model::Optimizer, set::Partition)
     m = model.model
-    lists = Py[m.list(Py(set.num_clients)) for _ = 1:set.num_trucks]
+    lists = Py[m.list(Py(set.num_clients)) for _ = 1:(set.num_trucks)]
     m.constraint(m.partition(pylist(lists)))
     indices = MOI.VariableIndex[]
     for hx_list in lists
@@ -151,7 +151,7 @@ end
 function MOI.add_constrained_variables(model::Optimizer, set::PartitionPD)
     m = model.model
     n_total = _pd_n_total(set)
-    lists = Py[m.list(Py(n_total)) for _ = 1:set.num_trucks]
+    lists = Py[m.list(Py(n_total)) for _ = 1:(set.num_trucks)]
     m.constraint(m.partition(pylist(lists)))
     for k = 0:(set.num_pickup_deliveries-1)
         p = set.num_services + k

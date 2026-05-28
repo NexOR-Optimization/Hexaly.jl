@@ -91,7 +91,7 @@ function _build_and_solve_raw(optimizer, inst)
     n = inst.n_customers
     service = inst.service_time
 
-    routes = [m.list(n) for _ = 1:inst.n_trucks]
+    routes = [m.list(n) for _ = 1:(inst.n_trucks)]
     m.constraint(m.partition(pylist(routes)))
 
     dist_arr = m.array(pylist([pylist(inst.dist_matrix[i, :]) for i = 1:n]))
@@ -101,7 +101,7 @@ function _build_and_solve_raw(optimizer, inst)
 
     route_dists = Py[]
     route_lateness = Py[]
-    for k = 1:inst.n_trucks
+    for k = 1:(inst.n_trucks)
         seq = routes[k]
         c = m.count(seq)
 
@@ -126,10 +126,8 @@ function _build_and_solve_raw(optimizer, inst)
                 pyfunc(
                     (i, prev) -> m.iif(
                         i == 0,
-                        m.max(
-                            m.at(earliest_arr, seq[0]),
-                            m.at(depot_arr, seq[0]),
-                        ) + Py(service),
+                        m.max(m.at(earliest_arr, seq[0]), m.at(depot_arr, seq[0])) +
+                        Py(service),
                         m.max(
                             m.at(earliest_arr, seq[i]),
                             prev + m.at(dist_arr, seq[i-1], seq[i]),
