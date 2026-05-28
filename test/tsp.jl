@@ -90,9 +90,9 @@ end
         # Walk the successor array: every node visited exactly once, returns to 1.
         tour, end_node = _tour_from_next(moi_sol.next_val, inst.n)
         @test end_node == 1
-        @test sort(tour) == collect(1:inst.n)
+        @test sort(tour) == collect(1:(inst.n))
         # Per-edge costs match the table values.
-        for i = 1:inst.n
+        for i = 1:(inst.n)
             @test moi_sol.cost_val[i] == inst.dist[i, moi_sol.next_val[i]]
         end
         # Objective equals the recomputed closed-tour cost.

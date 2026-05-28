@@ -45,12 +45,13 @@ end
 function _solve_raw(inst)
     optimizer = Hexaly.raw_optimizer()
     m = optimizer.model
-    routes = [m.list(inst.n_customers) for _ = 1:inst.n_trucks]
+    routes = [m.list(inst.n_customers) for _ = 1:(inst.n_trucks)]
     m.constraint(m.partition(pylist(routes)))
-    dist_arr = m.array(pylist([pylist(inst.dist_matrix[i, :]) for i = 1:inst.n_customers]))
+    dist_arr =
+        m.array(pylist([pylist(inst.dist_matrix[i, :]) for i = 1:(inst.n_customers)]))
     depot_arr = m.array(pylist(inst.dist_depot))
     route_dists = Py[]
-    for k = 1:inst.n_trucks
+    for k = 1:(inst.n_trucks)
         seq = routes[k]
         c = m.count(seq)
         leg = m.lambda_function(
@@ -84,7 +85,7 @@ function _solve_jump(inst)
     set_time_limit_sec(model, 5)
     @variable(
         model,
-        nodes[1:inst.n_customers, 1:inst.n_trucks] in
+        nodes[1:(inst.n_customers), 1:(inst.n_trucks)] in
         Hexaly.Partition(inst.n_customers, inst.n_trucks),
     )
     @objective(
@@ -92,14 +93,14 @@ function _solve_jump(inst)
         Min,
         sum(
             Hexaly.op_sum_distances(inst.M, vcat(inst.depot, nodes[:, i], inst.depot)) for
-            i = 1:inst.n_trucks
+            i = 1:(inst.n_trucks)
         ),
     )
     optimize!(model)
     @test termination_status(model) in (MOI.OPTIMAL, MOI.LOCALLY_SOLVED)
     inner = JuMP.unsafe_backend(model)
     routes = Vector{Int}[]
-    for i = 1:inst.n_trucks
+    for i = 1:(inst.n_trucks)
         vi = JuMP.index(nodes[1, i])
         list_py = inner.variable_info[vi].parent_list::PythonCall.Py
         list_val = list_py.value
