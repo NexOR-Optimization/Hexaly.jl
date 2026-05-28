@@ -71,8 +71,8 @@ end
 # Solve the VRPTW with the raw Hexaly Python API: one `model.list` per
 # truck, a `model.partition` over them, and per-truck distance + a
 # recursive `model.array(range, lambda(i, prev), 0)` for the end-of-service
-# time. Lexicographic objectives: minimise total lateness, then total
-# distance — for a feasible instance the lateness optimum is 0.
+# time. Time windows are enforced as one per-customer hard constraint via a
+# quantified `m.and_(range, lambda)`; the only objective is total distance.
 function _solve_raw(inst)
     # Force a Julia + Python GC so any orphaned `Py` reference to a Hexaly
     # optimizer from a previous (errored) run is finalised and its license
@@ -100,7 +100,6 @@ function _build_and_solve_raw(optimizer, inst)
     latest_arr = m.array(pylist(inst.latest))
 
     route_dists = Py[]
-    route_lateness = Py[]
     for k = 1:(inst.n_trucks)
         seq = routes[k]
         c = m.count(seq)
@@ -139,22 +138,22 @@ function _build_and_solve_raw(optimizer, inst)
             Py(0),
         )
 
-        # Lateness per visited customer = max(0, start_service - latest)
-        # where start_service = end_time[i] - service.
-        late = m.lambda_function(
-            pyfunc(
-                i -> m.max(Py(0), end_time[i] - Py(service) - m.at(latest_arr, seq[i]));
-                wrap = "lambda f: lambda i: f(i)",
+        # Per-customer time window: for every visited customer i,
+        # start_service[i] = end_time[i] - service <= latest[seq[i]].
+        m.constraint(
+            m.and_(
+                m.range(0, c),
+                m.lambda_function(
+                    pyfunc(
+                        i -> end_time[i] - Py(service) <= m.at(latest_arr, seq[i]);
+                        wrap = "lambda f: lambda i: f(i)",
+                    ),
+                ),
             ),
         )
-        push!(route_lateness, m.sum(m.range(0, c), late))
     end
 
     total_dist = m.sum(route_dists...)
-    total_late = m.sum(route_lateness...)
-
-    # Lexicographic: feasibility (lateness == 0) dominates distance.
-    m.minimize(total_late)
     m.minimize(total_dist)
     m.close()
 
@@ -164,21 +163,19 @@ function _build_and_solve_raw(optimizer, inst)
 
     route_vals = [[pyconvert(Int, x) for x in seq.value] for seq in routes]
     obj_dist = pyconvert(Int, total_dist.value)
-    obj_late = pyconvert(Int, total_late.value)
 
-    return route_vals, obj_dist, obj_late
+    return route_vals, obj_dist
 end
 
 @testset "VRPTW (raw Python API)" begin
     inst = _build_instance(seed = 1234, n_customers = 4, n_trucks = 2)
-    routes, obj_dist, obj_late = _solve_raw(inst)
+    routes, obj_dist = _solve_raw(inst)
 
     # Partition validity.
     @test sort(reduce(vcat, routes)) == collect(0:(inst.n_customers-1))
 
-    # Time-window feasibility: lateness == 0 and an independent simulation
-    # of arrival / wait / service times also confirms no customer is late.
-    @test obj_late == 0
+    # Independent simulation of arrival / wait / service times confirms
+    # that the hard `total_lateness == 0` constraint was respected.
     max_late, ok = _check_time_windows(routes, inst)
     @test ok
     @test max_late == 0
