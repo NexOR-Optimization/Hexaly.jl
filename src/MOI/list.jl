@@ -100,3 +100,76 @@ function MOI.add_constrained_variables(model::Optimizer, set::Partition)
         ConstraintInfo(cindex, nothing, MOI.VectorOfVariables(indices), set)
     return indices, cindex
 end
+
+# `Hexaly.PartitionPD` — `num_trucks` lists of size `n_total = num_services +
+# 2 * num_pickup_deliveries`, with a `model.partition` plus, for each
+# pickup/delivery pair `(p, d)`, two constraints per truck:
+#   - `contains(seq, p) == contains(seq, d)` (same truck holds both, or neither)
+#   - `index(seq, p) <= index(seq, d)`        (pickup precedes delivery)
+#
+# Indices follow the user-facing convention on the JuMP matrix `x[i, t]`:
+#   - `1 <= i <= num_services`                          → service
+#   - `num_services <  i <= num_services + num_pd`      → pickup k = i - num_services
+#   - `num_services + num_pd <  i <= n_total`           → delivery for pickup
+#                                                         k = i - num_services - num_pd
+# In Hexaly's 0-indexed list values this means service `0..num_services-1`,
+# pickup `num_services..num_services+num_pd-1`, delivery
+# `num_services+num_pd..n_total-1`, with pickup `k` paired to delivery
+# `num_services+num_pd+k` for `k = 0..num_pd-1`.
+
+struct PartitionPD <: MOI.AbstractVectorSet
+    num_services::Int
+    num_pickup_deliveries::Int
+    num_trucks::Int
+end
+
+_pd_n_total(s::PartitionPD) = s.num_services + 2 * s.num_pickup_deliveries
+
+MOI.dimension(s::PartitionPD) = _pd_n_total(s) * s.num_trucks
+
+function MOI.supports_add_constrained_variables(::Optimizer, ::Type{PartitionPD})
+    return true
+end
+
+function JuMP.build_variable(
+    error_fn::Function,
+    variables::Matrix{<:JuMP.AbstractVariable},
+    set::PartitionPD,
+)
+    n_total = _pd_n_total(set)
+    size(variables) == (n_total, set.num_trucks) || error_fn(
+        "Hexaly.PartitionPD: expected a `$n_total × $(set.num_trucks)` ",
+        "variable matrix, got `$(size(variables))`.",
+    )
+    return JuMP.VariablesConstrainedOnCreation(
+        vec(variables),
+        set,
+        JuMP.ArrayShape(size(variables)),
+    )
+end
+
+function MOI.add_constrained_variables(model::Optimizer, set::PartitionPD)
+    m = model.model
+    n_total = _pd_n_total(set)
+    lists = Py[m.list(Py(n_total)) for _ = 1:set.num_trucks]
+    m.constraint(m.partition(pylist(lists)))
+    for k = 0:(set.num_pickup_deliveries-1)
+        p = set.num_services + k
+        d = set.num_services + set.num_pickup_deliveries + k
+        for seq in lists
+            m.constraint(m.contains(seq, Py(p)) == m.contains(seq, Py(d)))
+            m.constraint(m.index(seq, Py(p)) <= m.index(seq, Py(d)))
+        end
+    end
+    indices = MOI.VariableIndex[]
+    for hx_list in lists
+        col_indices = _add_list_variables!(model, hx_list, n_total)
+        append!(indices, col_indices)
+    end
+    cindex = MOI.ConstraintIndex{MOI.VectorOfVariables,PartitionPD}(
+        length(model.constraint_info) + 1,
+    )
+    model.constraint_info[cindex] =
+        ConstraintInfo(cindex, nothing, MOI.VectorOfVariables(indices), set)
+    return indices, cindex
+end
