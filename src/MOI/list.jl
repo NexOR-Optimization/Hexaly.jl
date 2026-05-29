@@ -175,19 +175,26 @@ function MOI.add_constrained_variables(model::Optimizer, set::PartitionPD)
 end
 
 # `Hexaly.TimeWindows(travel, earliest, latest, service)` — a vector
-# constraint on `[depot; nodes]` where `depot` is a constant index into
-# `travel` and `nodes` is a column of variables backed by the same
-# Hexaly list (a column of a `Partition` / `PartitionPD`). The
-# constraint enforces, for every customer `i` actually visited by the
-# truck, that the service start time respects the latest deadline:
+# constraint on `[t; depot_start; nodes; depot_end]` where:
+#   - `t` is the truck's total-time decision variable;
+#   - `depot_start` / `depot_end` are constant Hexaly indices (typically the
+#     same depot, but the API allows different start/end depots);
+#   - `nodes` is a column of variables backed by the same Hexaly list (a
+#     column of a `Partition` / `PartitionPD`).
+# The constraint enforces, for every customer `i` actually visited by the
+# truck:
 #
-#   end_time[0] = max(earliest[seq[0]], travel[depot, seq[0]]) + service
-#   end_time[i] = max(earliest[seq[i]], end_time[i-1] + travel[seq[i-1], seq[i]]) + service
+#   end_time[0]  = max(earliest[seq[0]], travel[depot_start, seq[0]]) + service
+#   end_time[i]  = max(earliest[seq[i]], end_time[i-1] + travel[seq[i-1], seq[i]]) + service
 #   for all i: end_time[i] - service <= latest[seq[i]]
 #
-# `travel` is an `(n_total + 1) × (n_total + 1)` matrix indexed by Hexaly
-# 0-indexed customer ids and the depot id; `earliest` and `latest` have
-# length `n_total` and only cover the customers.
+# plus the makespan
+#
+#   total_time = (c > 0) ? end_time[c-1] + travel[seq[c-1], depot_end] : 0
+#   t >= total_time
+#
+# so that `@objective(model, Min, sum(t))` minimises the total trucking time
+# (travel + waiting + service + return to depot), not just the distance.
 
 struct TimeWindows{T<:Real} <: MOI.AbstractVectorSet
     travel::Matrix{T}
@@ -196,7 +203,7 @@ struct TimeWindows{T<:Real} <: MOI.AbstractVectorSet
     service::T
 end
 
-MOI.dimension(s::TimeWindows) = length(s.earliest) + 1
+MOI.dimension(s::TimeWindows) = length(s.earliest) + 3
 
 # `TimeWindows` is logically immutable after construction (the travel
 # matrix and the earliest/latest vectors are read-only data we copy into
@@ -219,27 +226,36 @@ function MOI.add_constraint(
 )
     items = _normalize_sum_distances_items(f)
     length(items) == MOI.dimension(s) || error(
-        "Hexaly.TimeWindows expected `length([depot; nodes]) == $(MOI.dimension(s))`; ",
-        "got $(length(items)).",
+        "Hexaly.TimeWindows expected `length([t; depot_start; nodes; depot_end]) == ",
+        "$(MOI.dimension(s))`; got $(length(items)).",
     )
-    items[1] isa Real || error(
-        "Hexaly.TimeWindows: first item must be the constant depot index.",
+    items[1] isa MOI.VariableIndex || error(
+        "Hexaly.TimeWindows: first item must be the total-time `t` variable.",
     )
-    depot = round(Int, items[1])
-    var_items = @view items[2:end]
+    items[2] isa Real || error(
+        "Hexaly.TimeWindows: second item must be the constant `depot_start` index.",
+    )
+    items[end] isa Real || error(
+        "Hexaly.TimeWindows: last item must be the constant `depot_end` index.",
+    )
+    t_vi = items[1]
+    depot_start = round(Int, items[2])
+    depot_end = round(Int, items[end])
+    var_items = @view items[3:(end-1)]
     all(it -> it isa MOI.VariableIndex, var_items) || error(
-        "Hexaly.TimeWindows: trailing items must be `MOI.VariableIndex` values backed ",
-        "by a Hexaly list (a column of a `Hexaly.Partition` / `Hexaly.PartitionPD`).",
+        "Hexaly.TimeWindows: items 3..end-1 must be node `MOI.VariableIndex` values ",
+        "backed by a Hexaly list (a column of a `Hexaly.Partition` / `Hexaly.PartitionPD`).",
     )
     first_pl = _info(model, var_items[1]).parent_list
     first_pl !== nothing || error(
-        "Hexaly.TimeWindows: variables have no parent Hexaly list.",
+        "Hexaly.TimeWindows: node variables have no parent Hexaly list.",
     )
     all(_info(model, vi).parent_list === first_pl for vi in var_items) || error(
         "Hexaly.TimeWindows: all node variables must belong to the same Hexaly list.",
     )
 
     m = model.model
+    t_var = _info(model, t_vi).variable
     seq = first_pl
     c = m.count(seq)
     service = round(Int, s.service)
@@ -257,7 +273,7 @@ function MOI.add_constraint(
                     i == 0,
                     m.max(
                         m.at(earliest_arr, seq[0]),
-                        m.at(dist_arr, Py(depot), seq[0]),
+                        m.at(dist_arr, Py(depot_start), seq[0]),
                     ) + Py(service),
                     m.max(
                         m.at(earliest_arr, seq[i]),
@@ -282,6 +298,15 @@ function MOI.add_constraint(
         ),
     )
 
+    # Makespan: t >= end_time[c-1] + travel[seq[c-1], depot_end] (or 0 if
+    # the truck stays at the depot).
+    total_time = m.iif(
+        c > 0,
+        end_time[c-1] + m.at(dist_arr, seq[c-1], Py(depot_end)),
+        Py(0),
+    )
+    m.constraint(t_var >= total_time)
+
     cindex = MOI.ConstraintIndex{typeof(f),typeof(s)}(
         length(model.constraint_info) + 1,
     )
@@ -289,6 +314,7 @@ function MOI.add_constraint(
     return cindex
 end
 
+<<<<<<< HEAD
 # `Hexaly.Capacity(delta, capacity)` — a vector constraint on the column of
 # variables for one truck (no depot prefix, since load starts at 0 at the
 # depot and only changes at visited customers). The constraint enforces:
@@ -378,17 +404,15 @@ function MOI.add_constraint(
     model.constraint_info[cindex] = ConstraintInfo(cindex, nothing, f, s)
     return cindex
 end
+=======
+>>>>>>> d4b0de7 (Add cost prefix)
 
 # `Hexaly.CapacitatedTimeWindows(travel, earliest, latest, fixed_time, slope,
-# delta, capacity)` — a single constraint that simultaneously enforces, for
-# the column `[depot; nodes]` of one truck:
-#   - capacity: cumulative load along the route never exceeds `capacity`
-#   - time windows: every customer's service start lies in its `[earliest,
-#     latest]` window, where service time at node `v` is the affine function
-#     `fixed_time + slope * |delta[v]|`.
-# The TW recurrence needs the per-node service time, which depends on the
-# load handled at that node — that's why both pieces have to live in one
-# set on the JuMP side.
+# delta, capacity)` — combined capacity + time-window constraint on
+# `[t; depot_start; nodes; depot_end]`. Same layout as `TimeWindows`, but
+# the per-node service time is the affine function
+# `fixed_time + slope * |delta[v]|` (so service time depends on the load
+# handled at that node — that's why capacity and TW must live in one set).
 
 struct CapacitatedTimeWindows{T<:Real} <: MOI.AbstractVectorSet
     travel::Matrix{T}
@@ -400,7 +424,7 @@ struct CapacitatedTimeWindows{T<:Real} <: MOI.AbstractVectorSet
     capacity::T
 end
 
-MOI.dimension(s::CapacitatedTimeWindows) = length(s.earliest) + 1
+MOI.dimension(s::CapacitatedTimeWindows) = length(s.earliest) + 3
 
 Base.copy(s::CapacitatedTimeWindows) = s
 
@@ -419,21 +443,33 @@ function MOI.add_constraint(
 )
     items = _normalize_sum_distances_items(f)
     length(items) == MOI.dimension(s) || error(
-        "Hexaly.CapacitatedTimeWindows expected `length([depot; nodes]) == ",
-        "$(MOI.dimension(s))`; got $(length(items)).",
+        "Hexaly.CapacitatedTimeWindows expected ",
+        "`length([t; depot_start; nodes; depot_end]) == $(MOI.dimension(s))`; ",
+        "got $(length(items)).",
     )
-    items[1] isa Real || error(
-        "Hexaly.CapacitatedTimeWindows: first item must be the constant depot index.",
+    items[1] isa MOI.VariableIndex || error(
+        "Hexaly.CapacitatedTimeWindows: first item must be the total-time ",
+        "`t` variable.",
     )
-    depot = round(Int, items[1])
-    var_items = @view items[2:end]
+    items[2] isa Real || error(
+        "Hexaly.CapacitatedTimeWindows: second item must be the constant ",
+        "`depot_start` index.",
+    )
+    items[end] isa Real || error(
+        "Hexaly.CapacitatedTimeWindows: last item must be the constant ",
+        "`depot_end` index.",
+    )
+    t_vi = items[1]
+    depot_start = round(Int, items[2])
+    depot_end = round(Int, items[end])
+    var_items = @view items[3:(end-1)]
     all(it -> it isa MOI.VariableIndex, var_items) || error(
-        "Hexaly.CapacitatedTimeWindows: trailing items must be `MOI.VariableIndex` ",
-        "values backed by a Hexaly list.",
+        "Hexaly.CapacitatedTimeWindows: items 3..end-1 must be node ",
+        "`MOI.VariableIndex` values backed by a Hexaly list.",
     )
     first_pl = _info(model, var_items[1]).parent_list
     first_pl !== nothing || error(
-        "Hexaly.CapacitatedTimeWindows: variables have no parent Hexaly list.",
+        "Hexaly.CapacitatedTimeWindows: node variables have no parent Hexaly list.",
     )
     all(_info(model, vi).parent_list === first_pl for vi in var_items) || error(
         "Hexaly.CapacitatedTimeWindows: all node variables must belong to the same ",
@@ -441,6 +477,7 @@ function MOI.add_constraint(
     )
 
     m = model.model
+    t_var = _info(model, t_vi).variable
     seq = first_pl
     c = m.count(seq)
     capacity = round(Int, s.capacity)
@@ -493,7 +530,7 @@ function MOI.add_constraint(
                     i == 0,
                     m.max(
                         m.at(earliest_arr, seq[0]),
-                        m.at(travel_arr, Py(depot), seq[0]),
+                        m.at(travel_arr, Py(depot_start), seq[0]),
                     ) + m.at(service_arr, seq[0]),
                     m.max(
                         m.at(earliest_arr, seq[i]),
@@ -520,6 +557,15 @@ function MOI.add_constraint(
             ),
         ),
     )
+
+    # Makespan: t >= end_time[c-1] + travel[seq[c-1], depot_end] (or 0 if
+    # the truck stays at the depot).
+    total_time = m.iif(
+        c > 0,
+        end_time[c-1] + m.at(travel_arr, seq[c-1], Py(depot_end)),
+        Py(0),
+    )
+    m.constraint(t_var >= total_time)
 
     cindex = MOI.ConstraintIndex{typeof(f),typeof(s)}(
         length(model.constraint_info) + 1,
