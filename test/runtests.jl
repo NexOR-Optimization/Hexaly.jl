@@ -66,5 +66,10 @@ const HAS_LICENSE = Hexaly.has_license()
         include("vrp.jl")
         include("vrppd.jl")
         include("vrptw.jl")
+<<<<<<< Updated upstream
+=======
+        include("cvrp.jl")
+        include("cvrptw.jl")
+>>>>>>> Stashed changes
     end
 end
