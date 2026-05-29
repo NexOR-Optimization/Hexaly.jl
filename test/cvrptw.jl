@@ -64,14 +64,23 @@ function _build_instance(;
     )
 end
 
-function _route_cost(routes, dist_depot, dist_matrix)
+# Sum of truck makespans, recomputed from the solution. A truck's
+# makespan is the time it returns to the depot: travel + waiting (if it
+# arrives before `earliest`) + affine service `fixed_time + slope * |delta[v]|`
+# + return travel. Empty trucks contribute 0.
+function _route_total_time(routes, inst)
     total = 0
     for r in routes
         isempty(r) && continue
-        total += dist_depot[r[1]+1] + dist_depot[r[end]+1]
-        for k = 2:length(r)
-            total += dist_matrix[r[k-1]+1, r[k]+1]
+        t = 0
+        for (k, v) in enumerate(r)
+            travel = k == 1 ? inst.dist_depot[v+1] : inst.dist_matrix[r[k-1]+1, v+1]
+            arrival = t + travel
+            start = max(inst.earliest[v+1], arrival)
+            svc = inst.fixed_time + inst.slope * abs(inst.delta[v+1])
+            t = start + svc
         end
+        total += t + inst.dist_depot[r[end]+1]
     end
     return total
 end
@@ -143,21 +152,10 @@ function _build_and_solve_raw(optimizer, inst)
     service_vals = [inst.fixed_time + inst.slope * abs(inst.delta[v]) for v = 1:n_total]
     service_arr = m.array(pylist(service_vals))
 
-    route_dists = Py[]
+    route_times = Py[]
     for k = 1:(inst.num_trucks)
         seq = routes[k]
         c = m.count(seq)
-
-        leg = m.lambda_function(
-            pyfunc(
-                i -> m.at(dist_arr, seq[i-1], seq[i]);
-                wrap = "lambda f: lambda i: f(i)",
-            ),
-        )
-        rd =
-            m.sum(m.range(1, c), leg) +
-            m.iif(c > 0, m.at(depot_arr, seq[0]) + m.at(depot_arr, seq[c-1]), 0)
-        push!(route_dists, rd)
 
         load = m.array(
             m.range(0, c),
@@ -217,9 +215,14 @@ function _build_and_solve_raw(optimizer, inst)
                 ),
             ),
         )
+
+        # Truck makespan = end_time at last customer + return travel to
+        # depot (or 0 if the truck never leaves the depot).
+        rt = m.iif(c > 0, end_time[c-1] + m.at(depot_arr, seq[c-1]), Py(0))
+        push!(route_times, rt)
     end
 
-    total = m.sum(route_dists...)
+    total = m.sum(route_times...)
     m.minimize(total)
     m.close()
 
@@ -234,13 +237,14 @@ end
 
 # JuMP / MOI solve: `Hexaly.PartitionPD` for the truck columns (partition +
 # PD pairing), one combined `Hexaly.CapacitatedTimeWindows` constraint per
-# truck (capacity + time windows, with affine per-node service time), and
-# `op_sum_distances` for the closed-tour distance objective.
+# truck (capacity + TW + makespan linkage `t[i] >= total_time_i`), and a
+# `sum(t)` objective so the makespan of every truck is minimised.
 function _solve_jump(inst)
     GC.gc()
     model = Model(Hexaly.Optimizer)
     set_silent(model)
     set_time_limit_sec(model, 5)
+    @variable(model, t[1:(inst.num_trucks)] >= 0)
     @variable(
         model,
         nodes[1:(inst.n_total), 1:(inst.num_trucks)] in Hexaly.PartitionPD(
@@ -252,7 +256,8 @@ function _solve_jump(inst)
     for i = 1:(inst.num_trucks)
         @constraint(
             model,
-            [inst.depot; nodes[:, i]] in Hexaly.CapacitatedTimeWindows(
+            [t[i]; inst.depot; nodes[:, i]; inst.depot] in
+            Hexaly.CapacitatedTimeWindows(
                 inst.M,
                 inst.earliest,
                 inst.latest,
@@ -263,14 +268,7 @@ function _solve_jump(inst)
             )
         )
     end
-    @objective(
-        model,
-        Min,
-        sum(
-            Hexaly.op_sum_distances(inst.M, vcat(inst.depot, nodes[:, i], inst.depot))
-            for i = 1:(inst.num_trucks)
-        ),
-    )
+    @objective(model, Min, sum(t))
     optimize!(model)
     @test termination_status(model) in (MOI.OPTIMAL, MOI.LOCALLY_SOLVED)
     inner = JuMP.unsafe_backend(model)
@@ -300,12 +298,12 @@ end
 
     @testset "raw Python API" begin
         _check_cvrptw!(raw_routes, inst)
-        @test raw_obj == _route_cost(raw_routes, inst.dist_depot, inst.dist_matrix)
+        @test raw_obj == _route_total_time(raw_routes, inst)
     end
 
     @testset "JuMP" begin
         _check_cvrptw!(jump_routes, inst)
-        @test jump_obj == _route_cost(jump_routes, inst.dist_depot, inst.dist_matrix)
+        @test jump_obj == _route_total_time(jump_routes, inst)
     end
 
     @testset "raw and JuMP agree on the objective" begin
