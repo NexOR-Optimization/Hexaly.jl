@@ -1,6 +1,8 @@
+using JuMP
 using Hexaly
 using PythonCall
 using Test
+import MathOptInterface as MOI
 using Random
 
 # VRPTW instance: same shape as `vrp.jl` plus a time window `[earliest_i,
@@ -19,6 +21,13 @@ function _build_instance(; seed::Int, n_customers::Int, n_trucks::Int)
     # handful of service times).
     earliest = [rand(0:30) for _ = 1:n_customers]
     latest = [earliest[c] + 300 for c = 1:n_customers]
+    # Full `(n_customers + 1) × (n_customers + 1)` travel matrix used by
+    # the JuMP encoding; depot sits at Hexaly index `n_customers`.
+    depot = n_customers
+    M = zeros(Int, n_customers + 1, n_customers + 1)
+    M[1:n_customers, 1:n_customers] .= dist_matrix
+    M[n_customers+1, 1:n_customers] .= dist_depot
+    M[1:n_customers, n_customers+1] .= dist_depot
     return (;
         n_customers,
         n_trucks,
@@ -27,6 +36,8 @@ function _build_instance(; seed::Int, n_customers::Int, n_trucks::Int)
         service_time,
         earliest,
         latest,
+        M,
+        depot,
     )
 end
 
@@ -167,19 +178,75 @@ function _build_and_solve_raw(optimizer, inst)
     return route_vals, obj_dist
 end
 
-@testset "VRPTW (raw Python API)" begin
+# Solve via JuMP / MOI using `Hexaly.Partition` + `Hexaly.op_sum_distances`
+# for the closed-tour distance objective, and `Hexaly.TimeWindows` for the
+# per-customer hard time-window constraint.
+function _solve_jump(inst)
+    GC.gc()
+    model = Model(Hexaly.Optimizer)
+    set_silent(model)
+    set_time_limit_sec(model, 5)
+    @variable(
+        model,
+        nodes[1:(inst.n_customers), 1:(inst.n_trucks)] in
+        Hexaly.Partition(inst.n_customers, inst.n_trucks),
+    )
+    for i = 1:(inst.n_trucks)
+        @constraint(
+            model,
+            [inst.depot; nodes[:, i]] in
+            Hexaly.TimeWindows(
+                inst.M,
+                inst.earliest,
+                inst.latest,
+                inst.service_time,
+            )
+        )
+    end
+    @objective(
+        model,
+        Min,
+        sum(
+            Hexaly.op_sum_distances(inst.M, vcat(inst.depot, nodes[:, i], inst.depot))
+            for i = 1:(inst.n_trucks)
+        ),
+    )
+    optimize!(model)
+    @test termination_status(model) in (MOI.OPTIMAL, MOI.LOCALLY_SOLVED)
+    inner = JuMP.unsafe_backend(model)
+    routes = Vector{Int}[]
+    for i = 1:(inst.n_trucks)
+        vi = JuMP.index(nodes[1, i])
+        list_py = inner.variable_info[vi].parent_list::PythonCall.Py
+        list_val = list_py.value
+        c = pyconvert(Int, list_val.count())
+        push!(routes, [pyconvert(Int, list_val[Py(k)]) for k = 0:(c-1)])
+    end
+    return routes, round(Int, objective_value(model))
+end
+
+@testset "VRPTW" begin
     inst = _build_instance(seed = 1234, n_customers = 4, n_trucks = 2)
-    routes, obj_dist = _solve_raw(inst)
+    raw_routes, raw_obj = _solve_raw(inst)
+    jump_routes, jump_obj = _solve_jump(inst)
 
-    # Partition validity.
-    @test sort(reduce(vcat, routes)) == collect(0:(inst.n_customers-1))
+    @testset "raw Python API" begin
+        @test sort(reduce(vcat, raw_routes)) == collect(0:(inst.n_customers-1))
+        max_late, ok = _check_time_windows(raw_routes, inst)
+        @test ok
+        @test max_late == 0
+        @test raw_obj == _route_cost(raw_routes, inst.dist_depot, inst.dist_matrix)
+    end
 
-    # Independent simulation of arrival / wait / service times confirms
-    # that the hard `total_lateness == 0` constraint was respected.
-    max_late, ok = _check_time_windows(routes, inst)
-    @test ok
-    @test max_late == 0
+    @testset "JuMP" begin
+        @test sort(reduce(vcat, jump_routes)) == collect(0:(inst.n_customers-1))
+        max_late, ok = _check_time_windows(jump_routes, inst)
+        @test ok
+        @test max_late == 0
+        @test jump_obj == _route_cost(jump_routes, inst.dist_depot, inst.dist_matrix)
+    end
 
-    # The reported distance objective matches a manual recomputation.
-    @test obj_dist == _route_cost(routes, inst.dist_depot, inst.dist_matrix)
+    @testset "raw and JuMP agree on the objective" begin
+        @test raw_obj == jump_obj
+    end
 end

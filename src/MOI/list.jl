@@ -173,3 +173,118 @@ function MOI.add_constrained_variables(model::Optimizer, set::PartitionPD)
         ConstraintInfo(cindex, nothing, MOI.VectorOfVariables(indices), set)
     return indices, cindex
 end
+
+# `Hexaly.TimeWindows(travel, earliest, latest, service)` — a vector
+# constraint on `[depot; nodes]` where `depot` is a constant index into
+# `travel` and `nodes` is a column of variables backed by the same
+# Hexaly list (a column of a `Partition` / `PartitionPD`). The
+# constraint enforces, for every customer `i` actually visited by the
+# truck, that the service start time respects the latest deadline:
+#
+#   end_time[0] = max(earliest[seq[0]], travel[depot, seq[0]]) + service
+#   end_time[i] = max(earliest[seq[i]], end_time[i-1] + travel[seq[i-1], seq[i]]) + service
+#   for all i: end_time[i] - service <= latest[seq[i]]
+#
+# `travel` is an `(n_total + 1) × (n_total + 1)` matrix indexed by Hexaly
+# 0-indexed customer ids and the depot id; `earliest` and `latest` have
+# length `n_total` and only cover the customers.
+
+struct TimeWindows{T<:Real} <: MOI.AbstractVectorSet
+    travel::Matrix{T}
+    earliest::Vector{T}
+    latest::Vector{T}
+    service::T
+end
+
+MOI.dimension(s::TimeWindows) = length(s.earliest) + 1
+
+# `TimeWindows` is logically immutable after construction (the travel
+# matrix and the earliest/latest vectors are read-only data we copy into
+# Hexaly arrays at constraint posting time), so a shallow copy is safe
+# and lets MOI's `CachingOptimizer` store the set in its internal model.
+Base.copy(s::TimeWindows) = s
+
+function MOI.supports_constraint(
+    ::Optimizer,
+    ::Type{<:Union{MOI.VectorOfVariables,MOI.VectorAffineFunction}},
+    ::Type{<:TimeWindows},
+)
+    return true
+end
+
+function MOI.add_constraint(
+    model::Optimizer,
+    f::Union{MOI.VectorOfVariables,MOI.VectorAffineFunction},
+    s::TimeWindows,
+)
+    items = _normalize_sum_distances_items(f)
+    length(items) == MOI.dimension(s) || error(
+        "Hexaly.TimeWindows expected `length([depot; nodes]) == $(MOI.dimension(s))`; ",
+        "got $(length(items)).",
+    )
+    items[1] isa Real || error(
+        "Hexaly.TimeWindows: first item must be the constant depot index.",
+    )
+    depot = round(Int, items[1])
+    var_items = @view items[2:end]
+    all(it -> it isa MOI.VariableIndex, var_items) || error(
+        "Hexaly.TimeWindows: trailing items must be `MOI.VariableIndex` values backed ",
+        "by a Hexaly list (a column of a `Hexaly.Partition` / `Hexaly.PartitionPD`).",
+    )
+    first_pl = _info(model, var_items[1]).parent_list
+    first_pl !== nothing || error(
+        "Hexaly.TimeWindows: variables have no parent Hexaly list.",
+    )
+    all(_info(model, vi).parent_list === first_pl for vi in var_items) || error(
+        "Hexaly.TimeWindows: all node variables must belong to the same Hexaly list.",
+    )
+
+    m = model.model
+    seq = first_pl
+    c = m.count(seq)
+    service = round(Int, s.service)
+    n_rows = size(s.travel, 1)
+    dist_arr =
+        m.array(pylist([pylist(round.(Int, s.travel[i, :])) for i = 1:n_rows]))
+    earliest_arr = m.array(pylist(round.(Int, s.earliest)))
+    latest_arr = m.array(pylist(round.(Int, s.latest)))
+
+    end_time = m.array(
+        m.range(0, c),
+        m.lambda_function(
+            pyfunc(
+                (i, prev) -> m.iif(
+                    i == 0,
+                    m.max(
+                        m.at(earliest_arr, seq[0]),
+                        m.at(dist_arr, Py(depot), seq[0]),
+                    ) + Py(service),
+                    m.max(
+                        m.at(earliest_arr, seq[i]),
+                        prev + m.at(dist_arr, seq[i-1], seq[i]),
+                    ) + Py(service),
+                );
+                wrap = "lambda f: lambda i, prev: f(i, prev)",
+            ),
+        ),
+        Py(0),
+    )
+
+    m.constraint(
+        m.and_(
+            m.range(0, c),
+            m.lambda_function(
+                pyfunc(
+                    i -> end_time[i] - Py(service) <= m.at(latest_arr, seq[i]);
+                    wrap = "lambda f: lambda i: f(i)",
+                ),
+            ),
+        ),
+    )
+
+    cindex = MOI.ConstraintIndex{typeof(f),typeof(s)}(
+        length(model.constraint_info) + 1,
+    )
+    model.constraint_info[cindex] = ConstraintInfo(cindex, nothing, f, s)
+    return cindex
+end
