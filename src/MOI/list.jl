@@ -378,3 +378,152 @@ function MOI.add_constraint(
     model.constraint_info[cindex] = ConstraintInfo(cindex, nothing, f, s)
     return cindex
 end
+
+# `Hexaly.CapacitatedTimeWindows(travel, earliest, latest, fixed_time, slope,
+# delta, capacity)` — a single constraint that simultaneously enforces, for
+# the column `[depot; nodes]` of one truck:
+#   - capacity: cumulative load along the route never exceeds `capacity`
+#   - time windows: every customer's service start lies in its `[earliest,
+#     latest]` window, where service time at node `v` is the affine function
+#     `fixed_time + slope * |delta[v]|`.
+# The TW recurrence needs the per-node service time, which depends on the
+# load handled at that node — that's why both pieces have to live in one
+# set on the JuMP side.
+
+struct CapacitatedTimeWindows{T<:Real} <: MOI.AbstractVectorSet
+    travel::Matrix{T}
+    earliest::Vector{T}
+    latest::Vector{T}
+    fixed_time::T
+    slope::T
+    delta::Vector{T}
+    capacity::T
+end
+
+MOI.dimension(s::CapacitatedTimeWindows) = length(s.earliest) + 1
+
+Base.copy(s::CapacitatedTimeWindows) = s
+
+function MOI.supports_constraint(
+    ::Optimizer,
+    ::Type{<:Union{MOI.VectorOfVariables,MOI.VectorAffineFunction}},
+    ::Type{<:CapacitatedTimeWindows},
+)
+    return true
+end
+
+function MOI.add_constraint(
+    model::Optimizer,
+    f::Union{MOI.VectorOfVariables,MOI.VectorAffineFunction},
+    s::CapacitatedTimeWindows,
+)
+    items = _normalize_sum_distances_items(f)
+    length(items) == MOI.dimension(s) || error(
+        "Hexaly.CapacitatedTimeWindows expected `length([depot; nodes]) == ",
+        "$(MOI.dimension(s))`; got $(length(items)).",
+    )
+    items[1] isa Real || error(
+        "Hexaly.CapacitatedTimeWindows: first item must be the constant depot index.",
+    )
+    depot = round(Int, items[1])
+    var_items = @view items[2:end]
+    all(it -> it isa MOI.VariableIndex, var_items) || error(
+        "Hexaly.CapacitatedTimeWindows: trailing items must be `MOI.VariableIndex` ",
+        "values backed by a Hexaly list.",
+    )
+    first_pl = _info(model, var_items[1]).parent_list
+    first_pl !== nothing || error(
+        "Hexaly.CapacitatedTimeWindows: variables have no parent Hexaly list.",
+    )
+    all(_info(model, vi).parent_list === first_pl for vi in var_items) || error(
+        "Hexaly.CapacitatedTimeWindows: all node variables must belong to the same ",
+        "Hexaly list.",
+    )
+
+    m = model.model
+    seq = first_pl
+    c = m.count(seq)
+    capacity = round(Int, s.capacity)
+    n_rows = size(s.travel, 1)
+    travel_arr =
+        m.array(pylist([pylist(round.(Int, s.travel[i, :])) for i = 1:n_rows]))
+    earliest_arr = m.array(pylist(round.(Int, s.earliest)))
+    latest_arr = m.array(pylist(round.(Int, s.latest)))
+    delta_arr = m.array(pylist(round.(Int, s.delta)))
+    # Pre-compute the per-node affine service time so the Hexaly model only
+    # needs an array lookup at each step of the recurrence.
+    service_vals = round.(Int, s.fixed_time .+ s.slope .* abs.(s.delta))
+    service_arr = m.array(pylist(service_vals))
+
+    # Cumulative load through the route.
+    load = m.array(
+        m.range(0, c),
+        m.lambda_function(
+            pyfunc(
+                (i, prev) -> m.iif(
+                    i == 0,
+                    m.at(delta_arr, seq[0]),
+                    prev + m.at(delta_arr, seq[i]),
+                );
+                wrap = "lambda f: lambda i, prev: f(i, prev)",
+            ),
+        ),
+        Py(0),
+    )
+
+    # Capacity constraint at every visited position.
+    m.constraint(
+        m.and_(
+            m.range(0, c),
+            m.lambda_function(
+                pyfunc(
+                    i -> load[i] <= Py(capacity);
+                    wrap = "lambda f: lambda i: f(i)",
+                ),
+            ),
+        ),
+    )
+
+    # End-of-service time, with service[v] = fixed_time + slope * |delta[v]|.
+    end_time = m.array(
+        m.range(0, c),
+        m.lambda_function(
+            pyfunc(
+                (i, prev) -> m.iif(
+                    i == 0,
+                    m.max(
+                        m.at(earliest_arr, seq[0]),
+                        m.at(travel_arr, Py(depot), seq[0]),
+                    ) + m.at(service_arr, seq[0]),
+                    m.max(
+                        m.at(earliest_arr, seq[i]),
+                        prev + m.at(travel_arr, seq[i-1], seq[i]),
+                    ) + m.at(service_arr, seq[i]),
+                );
+                wrap = "lambda f: lambda i, prev: f(i, prev)",
+            ),
+        ),
+        Py(0),
+    )
+
+    # Per-customer time window:  start_service[i] = end_time[i] - service[seq[i]]
+    # must satisfy start_service[i] <= latest[seq[i]].
+    m.constraint(
+        m.and_(
+            m.range(0, c),
+            m.lambda_function(
+                pyfunc(
+                    i -> end_time[i] - m.at(service_arr, seq[i]) <=
+                         m.at(latest_arr, seq[i]);
+                    wrap = "lambda f: lambda i: f(i)",
+                ),
+            ),
+        ),
+    )
+
+    cindex = MOI.ConstraintIndex{typeof(f),typeof(s)}(
+        length(model.constraint_info) + 1,
+    )
+    model.constraint_info[cindex] = ConstraintInfo(cindex, nothing, f, s)
+    return cindex
+end
