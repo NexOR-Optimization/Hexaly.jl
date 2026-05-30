@@ -314,7 +314,6 @@ function MOI.add_constraint(
     return cindex
 end
 
-<<<<<<< HEAD
 # `Hexaly.Capacity(delta, capacity)` — a vector constraint on the column of
 # variables for one truck (no depot prefix, since load starts at 0 at the
 # depot and only changes at visited customers). The constraint enforces:
@@ -404,8 +403,6 @@ function MOI.add_constraint(
     model.constraint_info[cindex] = ConstraintInfo(cindex, nothing, f, s)
     return cindex
 end
-=======
->>>>>>> d4b0de7 (Add cost prefix)
 
 # `Hexaly.CapacitatedTimeWindows(travel, earliest, latest, fixed_time, slope,
 # delta, capacity)` — combined capacity + time-window constraint on
