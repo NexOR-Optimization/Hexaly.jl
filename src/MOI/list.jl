@@ -288,3 +288,93 @@ function MOI.add_constraint(
     model.constraint_info[cindex] = ConstraintInfo(cindex, nothing, f, s)
     return cindex
 end
+
+# `Hexaly.Capacity(delta, capacity)` — a vector constraint on the column of
+# variables for one truck (no depot prefix, since load starts at 0 at the
+# depot and only changes at visited customers). The constraint enforces:
+#
+#   load[0] = delta[seq[0]]
+#   load[i] = load[i-1] + delta[seq[i]]      for i >= 1
+#   for all i: load[i] <= capacity
+#
+# `delta` has length `n_total` and is indexed by the Hexaly 0-indexed node
+# value (typically `+q` at a pickup and `-q` at the paired delivery).
+
+struct Capacity{T<:Real} <: MOI.AbstractVectorSet
+    delta::Vector{T}
+    capacity::T
+end
+
+MOI.dimension(s::Capacity) = length(s.delta)
+
+Base.copy(s::Capacity) = s
+
+function MOI.supports_constraint(
+    ::Optimizer,
+    ::Type{<:Union{MOI.VectorOfVariables,MOI.VectorAffineFunction}},
+    ::Type{<:Capacity},
+)
+    return true
+end
+
+function MOI.add_constraint(
+    model::Optimizer,
+    f::Union{MOI.VectorOfVariables,MOI.VectorAffineFunction},
+    s::Capacity,
+)
+    items = _normalize_sum_distances_items(f)
+    length(items) == MOI.dimension(s) || error(
+        "Hexaly.Capacity expected `length(nodes) == $(MOI.dimension(s))`; ",
+        "got $(length(items)).",
+    )
+    all(it -> it isa MOI.VariableIndex, items) || error(
+        "Hexaly.Capacity: every item must be a `MOI.VariableIndex` backed by ",
+        "a Hexaly list (a column of a `Hexaly.Partition` / `Hexaly.PartitionPD`).",
+    )
+    first_pl = _info(model, items[1]).parent_list
+    first_pl !== nothing || error(
+        "Hexaly.Capacity: variables have no parent Hexaly list.",
+    )
+    all(_info(model, vi).parent_list === first_pl for vi in items) || error(
+        "Hexaly.Capacity: all node variables must belong to the same Hexaly list.",
+    )
+
+    m = model.model
+    seq = first_pl
+    c = m.count(seq)
+    capacity = round(Int, s.capacity)
+    delta_arr = m.array(pylist(round.(Int, s.delta)))
+
+    load = m.array(
+        m.range(0, c),
+        m.lambda_function(
+            pyfunc(
+                (i, prev) -> m.iif(
+                    i == 0,
+                    m.at(delta_arr, seq[0]),
+                    prev + m.at(delta_arr, seq[i]),
+                );
+                wrap = "lambda f: lambda i, prev: f(i, prev)",
+            ),
+        ),
+        Py(0),
+    )
+
+    m.constraint(
+        m.and_(
+            m.range(0, c),
+            m.lambda_function(
+                pyfunc(
+                    i -> load[i] <= Py(capacity);
+                    wrap = "lambda f: lambda i: f(i)",
+                ),
+            ),
+        ),
+    )
+
+    cindex = MOI.ConstraintIndex{typeof(f),typeof(s)}(
+        length(model.constraint_info) + 1,
+    )
+    model.constraint_info[cindex] = ConstraintInfo(cindex, nothing, f, s)
+    return cindex
+end

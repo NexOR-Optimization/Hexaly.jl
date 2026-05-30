@@ -66,5 +66,6 @@ const HAS_LICENSE = Hexaly.has_license()
         include("vrp.jl")
         include("vrppd.jl")
         include("vrptw.jl")
+        include("cvrp.jl")
     end
 end
