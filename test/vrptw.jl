@@ -41,15 +41,22 @@ function _build_instance(; seed::Int, n_customers::Int, n_trucks::Int)
     )
 end
 
-# Recompute the total VRP cost (closed routes with depot legs).
-function _route_cost(routes, dist_depot, dist_matrix)
+# Sum of truck makespans recomputed from the solution. A truck's makespan
+# is the time it returns to the depot: travel + waiting (if it arrives at
+# a customer before that customer's earliest service start) + service +
+# return travel. Empty trucks contribute 0.
+function _route_total_time(routes, inst)
     total = 0
     for r in routes
         isempty(r) && continue
-        total += dist_depot[r[1]+1] + dist_depot[r[end]+1]
-        for k = 2:length(r)
-            total += dist_matrix[r[k-1]+1, r[k]+1]
+        t = 0
+        for (k, c) in enumerate(r)
+            travel = k == 1 ? inst.dist_depot[c+1] : inst.dist_matrix[r[k-1]+1, c+1]
+            arrival = t + travel
+            start = max(inst.earliest[c+1], arrival)
+            t = start + inst.service_time
         end
+        total += t + inst.dist_depot[r[end]+1]
     end
     return total
 end
@@ -80,10 +87,11 @@ function _check_time_windows(routes, inst)
 end
 
 # Solve the VRPTW with the raw Hexaly Python API: one `model.list` per
-# truck, a `model.partition` over them, and per-truck distance + a
-# recursive `model.array(range, lambda(i, prev), 0)` for the end-of-service
-# time. Time windows are enforced as one per-customer hard constraint via a
-# quantified `m.and_(range, lambda)`; the only objective is total distance.
+# truck, a `model.partition` over them, and per-truck end-of-service-time
+# recurrence via `model.array(range, lambda(i, prev), 0)`. Time windows
+# are enforced per-customer via a quantified `m.and_(range, lambda)`. The
+# objective is the total truck time (travel + wait + service + return to
+# depot), not just distance.
 function _solve_raw(inst)
     # Force a Julia + Python GC so any orphaned `Py` reference to a Hexaly
     # optimizer from a previous (errored) run is finalised and its license
@@ -110,22 +118,10 @@ function _build_and_solve_raw(optimizer, inst)
     earliest_arr = m.array(pylist(inst.earliest))
     latest_arr = m.array(pylist(inst.latest))
 
-    route_dists = Py[]
+    route_times = Py[]
     for k = 1:(inst.n_trucks)
         seq = routes[k]
         c = m.count(seq)
-
-        # Distance for this truck (closed VRP cost with depot legs).
-        leg = m.lambda_function(
-            pyfunc(
-                i -> m.at(dist_arr, seq[i-1], seq[i]);
-                wrap = "lambda f: lambda i: f(i)",
-            ),
-        )
-        rd =
-            m.sum(m.range(1, c), leg) +
-            m.iif(c > 0, m.at(depot_arr, seq[0]) + m.at(depot_arr, seq[c-1]), 0)
-        push!(route_dists, rd)
 
         # End-of-service time at the i-th customer in this truck.
         #   end_time[0]  = max(earliest[seq[0]], dist_depot[seq[0]]) + service
@@ -162,10 +158,15 @@ function _build_and_solve_raw(optimizer, inst)
                 ),
             ),
         )
+
+        # Truck makespan = end_time at last customer + return to depot
+        # (or 0 if the truck never leaves the depot).
+        rt = m.iif(c > 0, end_time[c-1] + m.at(depot_arr, seq[c-1]), Py(0))
+        push!(route_times, rt)
     end
 
-    total_dist = m.sum(route_dists...)
-    m.minimize(total_dist)
+    total_time = m.sum(route_times...)
+    m.minimize(total_time)
     m.close()
 
     optimizer.param.time_limit = 5
@@ -173,19 +174,21 @@ function _build_and_solve_raw(optimizer, inst)
     optimizer.solve()
 
     route_vals = [[pyconvert(Int, x) for x in seq.value] for seq in routes]
-    obj_dist = pyconvert(Int, total_dist.value)
+    obj_time = pyconvert(Int, total_time.value)
 
-    return route_vals, obj_dist
+    return route_vals, obj_time
 end
 
-# Solve via JuMP / MOI using `Hexaly.Partition` + `Hexaly.op_sum_distances`
-# for the closed-tour distance objective, and `Hexaly.TimeWindows` for the
-# per-customer hard time-window constraint.
+# Solve via JuMP / MOI: one `t[i]` variable per truck holds its makespan,
+# `Hexaly.TimeWindows` posts the per-customer TW constraint *and* the
+# `t[i] >= total_time_i` linkage, and the objective is `sum(t)` — minimising
+# total trucking time (travel + waiting + service + return to depot).
 function _solve_jump(inst)
     GC.gc()
     model = Model(Hexaly.Optimizer)
     set_silent(model)
     set_time_limit_sec(model, 5)
+    @variable(model, t[1:(inst.n_trucks)] >= 0)
     @variable(
         model,
         nodes[1:(inst.n_customers), 1:(inst.n_trucks)] in
@@ -194,7 +197,7 @@ function _solve_jump(inst)
     for i = 1:(inst.n_trucks)
         @constraint(
             model,
-            [inst.depot; nodes[:, i]] in
+            [t[i]; inst.depot; nodes[:, i]; inst.depot] in
             Hexaly.TimeWindows(
                 inst.M,
                 inst.earliest,
@@ -203,14 +206,7 @@ function _solve_jump(inst)
             )
         )
     end
-    @objective(
-        model,
-        Min,
-        sum(
-            Hexaly.op_sum_distances(inst.M, vcat(inst.depot, nodes[:, i], inst.depot))
-            for i = 1:(inst.n_trucks)
-        ),
-    )
+    @objective(model, Min, sum(t))
     optimize!(model)
     @test termination_status(model) in (MOI.OPTIMAL, MOI.LOCALLY_SOLVED)
     inner = JuMP.unsafe_backend(model)
@@ -235,7 +231,7 @@ end
         max_late, ok = _check_time_windows(raw_routes, inst)
         @test ok
         @test max_late == 0
-        @test raw_obj == _route_cost(raw_routes, inst.dist_depot, inst.dist_matrix)
+        @test raw_obj == _route_total_time(raw_routes, inst)
     end
 
     @testset "JuMP" begin
@@ -243,7 +239,7 @@ end
         max_late, ok = _check_time_windows(jump_routes, inst)
         @test ok
         @test max_late == 0
-        @test jump_obj == _route_cost(jump_routes, inst.dist_depot, inst.dist_matrix)
+        @test jump_obj == _route_total_time(jump_routes, inst)
     end
 
     @testset "raw and JuMP agree on the objective" begin
