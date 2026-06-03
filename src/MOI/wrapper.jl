@@ -13,7 +13,7 @@ mutable struct VariableInfo
     index::MOI.VariableIndex
     variable::Py  # Hexaly HxExpression (decision or list-element ref)
     # When the variable is an element of a Hexaly `list` decision variable
-    # (e.g., via `Hexaly.List` or `Hexaly.Partition`), `parent_list` is that
+    # (e.g., via `MathOptVRP.List` or `MathOptVRP.Partition`), `parent_list` is that
     # list expression. `_build_sum_distances_expression` uses it to access
     # the underlying list's variable count and elements.
     parent_list::Union{Nothing,Py}
