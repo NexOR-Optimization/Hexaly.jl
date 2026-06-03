@@ -377,7 +377,8 @@ function _evaluate_objective(m::Optimizer)
         return value(info.variable; is_integer = info.is_integer)
     elseif f isa MOI.ScalarNonlinearFunction
         # Hexaly's first objective expression carries the solved value.
-        return value(get_objective(m.model, 0); is_integer = false)
+        # Type (int vs double) is auto-detected from the expression.
+        return Float64(value(get_objective(m.model, 0)))
     else
         # ScalarAffineFunction
         T = typeof(f).parameters[1]

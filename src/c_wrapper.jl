@@ -340,11 +340,13 @@ function lambda_function(m::HxModel, f::Function; nargs::Int = 1)
     body isa HxExpression || error(
         "lambda_function: closure must return HxExpression; got $(typeof(body))",
     )
+    # Hexaly expects `arguments..., body` as the operand order (matching
+    # the Python `create_lambda_function`).
     lam_id = hx_create_expression(m.opt.ptr, HxOp.O_LambdaFunction)
-    hx_expr_add_operand(m.opt.ptr, lam_id, body.id)
     for a in arg_exprs
         hx_expr_add_operand(m.opt.ptr, lam_id, a.id)
     end
+    hx_expr_add_operand(m.opt.ptr, lam_id, body.id)
     return HxExpression(m.opt, lam_id)
 end
 
@@ -394,13 +396,30 @@ double_value(s::HxSolution, e::HxExpression) =
     Float64(hx_solution_double_value(s.ptr, e.id))
 
 # Convenience for the common pattern `e.value` on the optimizer.
-function value(e::HxExpression; is_integer::Bool = true)
+# When `is_integer` is not passed, the value type is auto-detected via
+# `hx_expr_type` (HXVT_INT vs HXVT_DOUBLE). The explicit keyword override
+# is kept for sites that already know the type.
+const HXVT_INT = 2
+
+function value(e::HxExpression; is_integer::Union{Bool,Nothing} = nothing)
     sol = hx_best_solution(e.opt.ptr)
+    if is_integer === nothing
+        is_integer = (hx_expr_type(e.opt.ptr, e.id) == HXVT_INT)
+    end
     return is_integer ? Int(hx_solution_int_value(sol, e.id)) :
                         Float64(hx_solution_double_value(sol, e.id))
 end
 
 solution_status(s::HxSolution) = hx_solution_status(s.ptr)
+
+# Collection-valued expressions (lists). Returns a Vector{Int} with the
+# elements of the solved list, in order.
+function collection_value(s::HxSolution, e::HxExpression)
+    coll = hx_solution_collection_value(s.ptr, e.id)
+    n = Int(hx_collection_count(coll))
+    return Int[hx_collection_get(coll, Cint(i)) for i = 0:(n-1)]
+end
+collection_value(e::HxExpression) = collection_value(solution(e.opt), e)
 
 # ── Parameters (HxParam) ──────────────────────────────────────────────
 #
@@ -427,8 +446,12 @@ function set_param!(p::HxParam, name::AbstractString, value::Bool)
 end
 
 # Set `time_limit` / `verbosity` via a typed helper.
-time_limit!(p::HxParam, seconds::Integer) = set_param!(p, "time_limit", Int(seconds))
+# The Hexaly attribute names are camelCase (e.g. `timeLimit`, `nbThreads`),
+# not snake_case — the Python wrapper does its own name mangling.
+time_limit!(p::HxParam, seconds::Integer) = set_param!(p, "timeLimit", Int(seconds))
 verbosity!(p::HxParam, level::Integer) = set_param!(p, "verbosity", Int(level))
+nb_threads!(p::HxParam, n::Integer) = set_param!(p, "nbThreads", Int(n))
+seed!(p::HxParam, s::Integer) = set_param!(p, "seed", Int(s))
 
 function get_param_int(p::HxParam, name::AbstractString)
     return Int(hx_attrs_get_int(p.ptr, name))
@@ -438,7 +461,7 @@ function get_param_double(p::HxParam, name::AbstractString)
 end
 
 # Statistics
-running_time(s::HxStatistics) = Float64(hx_attrs_get_int(s.ptr, "running_time"))
+running_time(s::HxStatistics) = Float64(hx_attrs_get_int(s.ptr, "runningTime"))
 
 # ── Operator overloading sugar (mirrors Python ``a + b`` etc.) ─────────
 # Hexaly's Python wrapper overloads arithmetic and comparison so model

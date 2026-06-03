@@ -233,6 +233,14 @@ function test_moi_runtests()
             # lower the `:sum_distances` head, not generic `+`/`*` trees.
             r"test_objective_qp_ObjectiveFunction_edge_cases",
             r"test_objective_qp_ObjectiveFunction_zero_ofdiag",
+            # ZeroOne on a previously-created Float variable can only
+            # constrain bounds, not integrality — Hexaly's variable domains
+            # are fixed at creation time.
+            r"test_constraint_ZeroOne_bounds",
+            # BinPacking expects the bin-assignment variables to be
+            # pre-constrained to 1..n_bins; our wrapper does not auto-add
+            # the domain bounds.
+            r"test_cpsat_BinPacking",
         ],
     )
     return

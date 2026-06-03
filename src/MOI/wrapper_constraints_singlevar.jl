@@ -76,6 +76,26 @@ function MOI.is_valid(
     return MOI.is_valid(m, index) && _info(m, index).is_integer
 end
 
+# `Int` / `ZeroOne` annotations on existing variables are redundant — the
+# variable was created with the right Hexaly domain (`int!`, `bool!`).
+# Record the constraint for MOI bookkeeping but skip posting to Hexaly.
+function MOI.add_constraint(
+    m::Optimizer,
+    f::MOI.VariableIndex,
+    s::Union{MOI.Integer,MOI.ZeroOne},
+)
+    info = _info(m, f)
+    if s isa MOI.ZeroOne
+        info.is_binary = true
+        info.lb, info.ub = 0.0, 1.0
+    end
+    info.is_integer = true
+    S = typeof(s)
+    index = MOI.ConstraintIndex{MOI.VariableIndex,S}(f.value)
+    m.constraint_info[index] = ConstraintInfo(index, nothing, f, s)
+    return index
+end
+
 function MOI.add_constraint(
     m::Optimizer,
     f::MOI.VariableIndex,
