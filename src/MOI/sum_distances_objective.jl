@@ -21,7 +21,7 @@ end
 # Lower a `ScalarNonlinearFunction` whose root head is `:sum_distances`, or a
 # `:+` tree (sum of subexpressions) whose leaves are `:sum_distances` — the
 # shape JuMP produces when the user writes
-# `sum(Hexaly.op_sum_distances(...) for i in 1:n_trucks)`.
+# `sum(MathOptVRP.op_sum_distances(...) for i in 1:n_trucks)`.
 function _build_sum_distances_expression(model::Optimizer, f::MOI.ScalarNonlinearFunction)
     if f.head == :+
         terms = [_build_sum_distances_expression(model, arg) for arg in f.args]
