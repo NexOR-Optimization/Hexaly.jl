@@ -10,9 +10,6 @@ MathOptInterface = "b8f27783-ece8-5eb3-8dc8-9495eed66fee"
 MathOptVRP = "ee161a15-0030-435c-8c62-bd8c501c3551"
 PythonCall = "6099a3de-0909-46bc-b1f4-468b9a2dfc0d"
 
-[sources]
-MathOptVRP = {path = "../MathOptVRP"}
-
 [compat]
 CondaPkg = "0.2"
 JuMP = "1.30.1"
