@@ -1,33 +1,33 @@
 # Build Hexaly expressions for ScalarAffineFunction-in-Set constraints.
 # The LHS is built via `_build_linear_expression`, and the comparison is
-# expressed through `model.eq` / `model.leq` / `model.geq`.
+# expressed through `eq` / `leq` / `geq` from the C wrapper.
 
 function _build_constraint(
-    model::Optimizer,
+    m::Optimizer,
     f::MOI.ScalarAffineFunction{T},
     s::MOI.EqualTo{T},
 ) where {T<:Real}
-    lhs = _build_linear_expression(model, f)
-    rhs = T <: Integer ? _py_int(s.value) : _py_float(s.value)
-    return model.model.eq(lhs, rhs)
+    lhs = _build_linear_expression(m, f)
+    rhs = T <: Integer ? Int(s.value) : Float64(s.value)
+    return eq(m.model, lhs, rhs)
 end
 
 function _build_constraint(
-    model::Optimizer,
+    m::Optimizer,
     f::MOI.ScalarAffineFunction{T},
     s::MOI.LessThan{T},
 ) where {T<:Real}
-    lhs = _build_linear_expression(model, f)
-    rhs = T <: Integer ? _py_int(s.upper) : _py_float(s.upper)
-    return model.model.leq(lhs, rhs)
+    lhs = _build_linear_expression(m, f)
+    rhs = T <: Integer ? Int(s.upper) : Float64(s.upper)
+    return leq(m.model, lhs, rhs)
 end
 
 function _build_constraint(
-    model::Optimizer,
+    m::Optimizer,
     f::MOI.ScalarAffineFunction{T},
     s::MOI.GreaterThan{T},
 ) where {T<:Real}
-    lhs = _build_linear_expression(model, f)
-    rhs = T <: Integer ? _py_int(s.lower) : _py_float(s.lower)
-    return model.model.geq(lhs, rhs)
+    lhs = _build_linear_expression(m, f)
+    rhs = T <: Integer ? Int(s.lower) : Float64(s.lower)
+    return geq(m.model, lhs, rhs)
 end

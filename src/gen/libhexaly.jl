@@ -1223,9 +1223,3 @@ function hx_interrupt(reason, exdata)
     ccall((:hx_interrupt, libhexaly), Cvoid, (Ptr{Cchar}, Ptr{Cvoid}), reason, exdata)
 end
 
-# Skipping MacroDefinition: HX_LIB_PUBLIC __attribute__ ( ( visibility ( "default" ) ) )
-
-# Skipping MacroDefinition: HX_LIB_LOCAL __attribute__ ( ( visibility ( "hidden" ) ) )
-
-const HX_API_EXPORT = HX_LIB_PUBLIC
-

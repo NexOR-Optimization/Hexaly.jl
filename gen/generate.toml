@@ -4,3 +4,16 @@ output_file_path = "src/gen/libhexaly.jl"
 print_using_CEnum = false
 extract_c_comment_style = "doxygen"
 prologue_file_path = "gen/prologue.jl"
+output_ignorelist = [
+    "HX_API_EXPORT",
+    "HX_LIB_PUBLIC",
+    "HX_LIB_LOCAL",
+    "HX_API_GUARD_BEGIN",
+    "HX_API_GUARD_END",
+    "HX_INT_MAX",
+    "HX_INT_MIN",
+    "HX_INT_NAN",
+    "HX_FLT_NAN",
+    "HX_FLT_MAX",
+    "HX_FLT_MIN",
+]

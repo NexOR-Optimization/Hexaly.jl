@@ -1,9 +1,9 @@
-function _has_lb(model::Optimizer, index::MOI.VariableIndex)
-    return _info(model, index).lb !== nothing
+function _has_lb(m::Optimizer, index::MOI.VariableIndex)
+    return _info(m, index).lb !== nothing
 end
 
-function _has_ub(model::Optimizer, index::MOI.VariableIndex)
-    return _info(model, index).ub !== nothing
+function _has_ub(m::Optimizer, index::MOI.VariableIndex)
+    return _info(m, index).ub !== nothing
 end
 
 function MOI.supports_constraint(
@@ -26,129 +26,129 @@ function MOI.supports_constraint(
 end
 
 function MOI.is_valid(
-    model::Optimizer,
+    m::Optimizer,
     c::MOI.ConstraintIndex{MOI.VariableIndex,MOI.LessThan{T}},
 ) where {T<:Real}
     index = MOI.VariableIndex(c.value)
-    return MOI.is_valid(model, index) && _has_ub(model, index)
+    return MOI.is_valid(m, index) && _has_ub(m, index)
 end
 
 function MOI.is_valid(
-    model::Optimizer,
+    m::Optimizer,
     c::MOI.ConstraintIndex{MOI.VariableIndex,MOI.GreaterThan{T}},
 ) where {T<:Real}
     index = MOI.VariableIndex(c.value)
-    return MOI.is_valid(model, index) && _has_lb(model, index)
+    return MOI.is_valid(m, index) && _has_lb(m, index)
 end
 
 function MOI.is_valid(
-    model::Optimizer,
+    m::Optimizer,
     c::MOI.ConstraintIndex{MOI.VariableIndex,MOI.Interval{T}},
 ) where {T<:Real}
     index = MOI.VariableIndex(c.value)
-    return MOI.is_valid(model, index) && _has_lb(model, index) && _has_ub(model, index)
+    return MOI.is_valid(m, index) && _has_lb(m, index) && _has_ub(m, index)
 end
 
 function MOI.is_valid(
-    model::Optimizer,
+    m::Optimizer,
     c::MOI.ConstraintIndex{MOI.VariableIndex,MOI.EqualTo{T}},
 ) where {T<:Real}
     index = MOI.VariableIndex(c.value)
-    return MOI.is_valid(model, index) &&
-           _info(model, index).lb !== nothing &&
-           _info(model, index).ub !== nothing &&
-           _info(model, index).lb == _info(model, index).ub
+    return MOI.is_valid(m, index) &&
+           _info(m, index).lb !== nothing &&
+           _info(m, index).ub !== nothing &&
+           _info(m, index).lb == _info(m, index).ub
 end
 
 function MOI.is_valid(
-    model::Optimizer,
+    m::Optimizer,
     c::MOI.ConstraintIndex{MOI.VariableIndex,MOI.ZeroOne},
 )
     index = MOI.VariableIndex(c.value)
-    return MOI.is_valid(model, index) && _info(model, index).is_binary
+    return MOI.is_valid(m, index) && _info(m, index).is_binary
 end
 
 function MOI.is_valid(
-    model::Optimizer,
+    m::Optimizer,
     c::MOI.ConstraintIndex{MOI.VariableIndex,MOI.Integer},
 )
     index = MOI.VariableIndex(c.value)
-    return MOI.is_valid(model, index) && _info(model, index).is_integer
+    return MOI.is_valid(m, index) && _info(m, index).is_integer
 end
 
 function MOI.add_constraint(
-    model::Optimizer,
+    m::Optimizer,
     f::MOI.VariableIndex,
     s::MOI.EqualTo{T},
 ) where {T<:Real}
-    v = _info(model, f).variable
-    val = T <: Integer ? _py_int(s.value) : _py_float(s.value)
-    expr = model.model.eq(v, val)
-    _add_hexaly_constraint!(model, expr)
-    info = _info(model, f)
+    v = _info(m, f).variable
+    rhs = T <: Integer ? Int(s.value) : Float64(s.value)
+    expr = eq(m.model, v, rhs)
+    _add_hexaly_constraint!(m, expr)
+    info = _info(m, f)
     info.lb = Float64(s.value)
     info.ub = Float64(s.value)
     index = MOI.ConstraintIndex{MOI.VariableIndex,MOI.EqualTo{T}}(f.value)
-    model.constraint_info[index] = ConstraintInfo(index, expr, f, s)
+    m.constraint_info[index] = ConstraintInfo(index, expr, f, s)
     return index
 end
 
 function MOI.add_constraint(
-    model::Optimizer,
+    m::Optimizer,
     f::MOI.VariableIndex,
     s::MOI.LessThan{T},
 ) where {T<:Real}
-    v = _info(model, f).variable
-    val = T <: Integer ? _py_int(s.upper) : _py_float(s.upper)
-    expr = model.model.leq(v, val)
-    _add_hexaly_constraint!(model, expr)
-    _info(model, f).ub = Float64(s.upper)
+    v = _info(m, f).variable
+    rhs = T <: Integer ? Int(s.upper) : Float64(s.upper)
+    expr = leq(m.model, v, rhs)
+    _add_hexaly_constraint!(m, expr)
+    _info(m, f).ub = Float64(s.upper)
     index = MOI.ConstraintIndex{MOI.VariableIndex,MOI.LessThan{T}}(f.value)
-    model.constraint_info[index] = ConstraintInfo(index, expr, f, s)
+    m.constraint_info[index] = ConstraintInfo(index, expr, f, s)
     return index
 end
 
 function MOI.add_constraint(
-    model::Optimizer,
+    m::Optimizer,
     f::MOI.VariableIndex,
     s::MOI.GreaterThan{T},
 ) where {T<:Real}
-    v = _info(model, f).variable
-    val = T <: Integer ? _py_int(s.lower) : _py_float(s.lower)
-    expr = model.model.geq(v, val)
-    _add_hexaly_constraint!(model, expr)
-    _info(model, f).lb = Float64(s.lower)
+    v = _info(m, f).variable
+    rhs = T <: Integer ? Int(s.lower) : Float64(s.lower)
+    expr = geq(m.model, v, rhs)
+    _add_hexaly_constraint!(m, expr)
+    _info(m, f).lb = Float64(s.lower)
     index = MOI.ConstraintIndex{MOI.VariableIndex,MOI.GreaterThan{T}}(f.value)
-    model.constraint_info[index] = ConstraintInfo(index, expr, f, s)
+    m.constraint_info[index] = ConstraintInfo(index, expr, f, s)
     return index
 end
 
 function MOI.add_constraint(
-    model::Optimizer,
+    m::Optimizer,
     f::MOI.VariableIndex,
     s::MOI.Interval{T},
 ) where {T<:Real}
-    v = _info(model, f).variable
-    lb = T <: Integer ? _py_int(s.lower) : _py_float(s.lower)
-    ub = T <: Integer ? _py_int(s.upper) : _py_float(s.upper)
-    lb_expr = model.model.geq(v, lb)
-    ub_expr = model.model.leq(v, ub)
-    _add_hexaly_constraint!(model, lb_expr)
-    _add_hexaly_constraint!(model, ub_expr)
-    info = _info(model, f)
+    v = _info(m, f).variable
+    lb = T <: Integer ? Int(s.lower) : Float64(s.lower)
+    ub = T <: Integer ? Int(s.upper) : Float64(s.upper)
+    lb_expr = geq(m.model, v, lb)
+    ub_expr = leq(m.model, v, ub)
+    _add_hexaly_constraint!(m, lb_expr)
+    _add_hexaly_constraint!(m, ub_expr)
+    info = _info(m, f)
     info.lb = Float64(s.lower)
     info.ub = Float64(s.upper)
     index = MOI.ConstraintIndex{MOI.VariableIndex,MOI.Interval{T}}(f.value)
-    model.constraint_info[index] = ConstraintInfo(index, nothing, f, s)
+    m.constraint_info[index] = ConstraintInfo(index, nothing, f, s)
     return index
 end
 
 function MOI.get(
-    model::Optimizer,
+    m::Optimizer,
     ::MOI.ConstraintFunction,
     c::MOI.ConstraintIndex{MOI.VariableIndex,<:Any},
 )
-    MOI.throw_if_not_valid(model, c)
+    MOI.throw_if_not_valid(m, c)
     return MOI.VariableIndex(c.value)
 end
 

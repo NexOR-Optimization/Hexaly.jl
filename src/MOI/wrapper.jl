@@ -1,5 +1,5 @@
 # Default domain bounds for Hexaly integer variables when none are specified.
-# Hexaly requires explicit bounds for `model.int(lb, ub)`.
+# Hexaly requires explicit bounds for `int(lb, ub)`.
 const _DEFAULT_INT_LB = -1_000_000
 const _DEFAULT_INT_UB = 1_000_000
 const _DEFAULT_FLOAT_LB = -1e15
@@ -11,12 +11,12 @@ const _DEFAULT_TIME_LIMIT = 10
 
 mutable struct VariableInfo
     index::MOI.VariableIndex
-    variable::Py  # Hexaly HxExpression (decision or list-element ref)
+    variable::HxExpression
     # When the variable is an element of a Hexaly `list` decision variable
     # (e.g., via `MathOptVRP.List` or `MathOptVRP.Partition`), `parent_list` is that
     # list expression. `_build_sum_distances_expression` uses it to access
     # the underlying list's variable count and elements.
-    parent_list::Union{Nothing,Py}
+    parent_list::Union{Nothing,HxExpression}
     name::String
     lb::Union{Nothing,Float64}
     ub::Union{Nothing,Float64}
@@ -26,9 +26,9 @@ end
 
 function VariableInfo(
     index::MOI.VariableIndex,
-    variable::Py;
+    variable::HxExpression;
     is_integer::Bool = true,
-    parent_list::Union{Nothing,Py} = nothing,
+    parent_list::Union{Nothing,HxExpression} = nothing,
 )
     return VariableInfo(
         index,
@@ -44,7 +44,7 @@ end
 
 mutable struct ConstraintInfo
     index::MOI.ConstraintIndex
-    constraint::Union{Py,Nothing}  # Hexaly constraint expression
+    constraint::Union{HxExpression,Nothing}
     f::Union{MOI.AbstractScalarFunction,MOI.AbstractVectorFunction}
     set::MOI.AbstractSet
     name::String
@@ -52,7 +52,7 @@ end
 
 function ConstraintInfo(
     index::MOI.ConstraintIndex,
-    constraint::Union{Py,Nothing},
+    constraint::Union{HxExpression,Nothing},
     f::Union{MOI.AbstractScalarFunction,MOI.AbstractVectorFunction},
     set::MOI.AbstractSet,
 )
@@ -60,8 +60,8 @@ function ConstraintInfo(
 end
 
 mutable struct Optimizer <: MOI.AbstractOptimizer
-    inner::Py   # HexalyOptimizer
-    model::Py   # HxModel
+    inner::HexalyOptimizer
+    model::HxModel
     variable_info::MOI.Utilities.CleverDicts.CleverDict{MOI.VariableIndex,VariableInfo}
     constraint_info::Dict{MOI.ConstraintIndex,ConstraintInfo}
     name::String
@@ -83,53 +83,53 @@ mutable struct Optimizer <: MOI.AbstractOptimizer
     solved::Bool
 
     function Optimizer()
-        model = new()
-        model.inner = raw_optimizer()
-        model.model = model.inner.model
-        model.variable_info =
+        m = new()
+        m.inner = raw_optimizer()
+        m.model = model(m.inner)
+        m.variable_info =
             MOI.Utilities.CleverDicts.CleverDict{MOI.VariableIndex,VariableInfo}()
-        model.constraint_info = Dict{MOI.ConstraintIndex,ConstraintInfo}()
-        model.name = ""
-        model.objective_sense = MOI.FEASIBILITY_SENSE
-        model.objective_function_type = nothing
-        model.objective_function = nothing
-        model.silent = false
-        model.time_limit = nothing
-        model.options = Dict{String,Any}()
-        model.termination_status = MOI.OPTIMIZE_NOT_CALLED
-        model.primal_status = MOI.NO_SOLUTION
-        model.raw_status_string = ""
-        model.solved = false
-        return model
+        m.constraint_info = Dict{MOI.ConstraintIndex,ConstraintInfo}()
+        m.name = ""
+        m.objective_sense = MOI.FEASIBILITY_SENSE
+        m.objective_function_type = nothing
+        m.objective_function = nothing
+        m.silent = false
+        m.time_limit = nothing
+        m.options = Dict{String,Any}()
+        m.termination_status = MOI.OPTIMIZE_NOT_CALLED
+        m.primal_status = MOI.NO_SOLUTION
+        m.raw_status_string = ""
+        m.solved = false
+        return m
     end
 end
 
-function MOI.empty!(model::Optimizer)
-    # PythonCall handles ref-counting; the previous HexalyOptimizer is
-    # released when `model.inner` is reassigned.
-    model.inner = raw_optimizer()
-    model.model = model.inner.model
-    empty!(model.variable_info)
-    empty!(model.constraint_info)
-    model.name = ""
-    model.objective_sense = MOI.FEASIBILITY_SENSE
-    model.objective_function_type = nothing
-    model.objective_function = nothing
-    model.termination_status = MOI.OPTIMIZE_NOT_CALLED
-    model.primal_status = MOI.NO_SOLUTION
-    model.raw_status_string = ""
-    model.solved = false
+function MOI.empty!(m::Optimizer)
+    # The previous HexalyOptimizer's finalizer will release the C handle
+    # when GC runs.
+    m.inner = raw_optimizer()
+    m.model = model(m.inner)
+    empty!(m.variable_info)
+    empty!(m.constraint_info)
+    m.name = ""
+    m.objective_sense = MOI.FEASIBILITY_SENSE
+    m.objective_function_type = nothing
+    m.objective_function = nothing
+    m.termination_status = MOI.OPTIMIZE_NOT_CALLED
+    m.primal_status = MOI.NO_SOLUTION
+    m.raw_status_string = ""
+    m.solved = false
     return
 end
 
-function MOI.is_empty(model::Optimizer)
-    !isempty(model.name) && return false
-    !isempty(model.variable_info) && return false
-    !isempty(model.constraint_info) && return false
-    model.objective_sense != MOI.FEASIBILITY_SENSE && return false
-    model.objective_function_type !== nothing && return false
-    model.objective_function !== nothing && return false
-    model.solved && return false
+function MOI.is_empty(m::Optimizer)
+    !isempty(m.name) && return false
+    !isempty(m.variable_info) && return false
+    !isempty(m.constraint_info) && return false
+    m.objective_sense != MOI.FEASIBILITY_SENSE && return false
+    m.objective_function_type !== nothing && return false
+    m.objective_function !== nothing && return false
+    m.solved && return false
     return true
 end
 
@@ -145,34 +145,34 @@ function MOI.supports(::Optimizer, ::MOI.Name)
     return true
 end
 
-MOI.get(model::Optimizer, ::MOI.Name) = model.name
+MOI.get(m::Optimizer, ::MOI.Name) = m.name
 
-function MOI.set(model::Optimizer, ::MOI.Name, name::String)
-    model.name = name
+function MOI.set(m::Optimizer, ::MOI.Name, name::String)
+    m.name = name
     return
 end
 
 # Silent / Verbosity
 
 MOI.supports(::Optimizer, ::MOI.Silent) = true
-MOI.get(model::Optimizer, ::MOI.Silent) = model.silent
-function MOI.set(model::Optimizer, ::MOI.Silent, silent::Bool)
-    model.silent = silent
+MOI.get(m::Optimizer, ::MOI.Silent) = m.silent
+function MOI.set(m::Optimizer, ::MOI.Silent, silent::Bool)
+    m.silent = silent
     return
 end
 
 # Time limit
 
 MOI.supports(::Optimizer, ::MOI.TimeLimitSec) = true
-MOI.get(model::Optimizer, ::MOI.TimeLimitSec) = model.time_limit
+MOI.get(m::Optimizer, ::MOI.TimeLimitSec) = m.time_limit
 
-function MOI.set(model::Optimizer, ::MOI.TimeLimitSec, ::Nothing)
-    model.time_limit = nothing
+function MOI.set(m::Optimizer, ::MOI.TimeLimitSec, ::Nothing)
+    m.time_limit = nothing
     return
 end
 
-function MOI.set(model::Optimizer, ::MOI.TimeLimitSec, value::Real)
-    model.time_limit = Float64(value)
+function MOI.set(m::Optimizer, ::MOI.TimeLimitSec, value::Real)
+    m.time_limit = Float64(value)
     return
 end
 
@@ -180,12 +180,12 @@ end
 
 MOI.supports(::Optimizer, ::MOI.RawOptimizerAttribute) = true
 
-function MOI.get(model::Optimizer, attr::MOI.RawOptimizerAttribute)
-    return get(model.options, attr.name, nothing)
+function MOI.get(m::Optimizer, attr::MOI.RawOptimizerAttribute)
+    return get(m.options, attr.name, nothing)
 end
 
-function MOI.set(model::Optimizer, attr::MOI.RawOptimizerAttribute, value)
-    model.options[attr.name] = value
+function MOI.set(m::Optimizer, attr::MOI.RawOptimizerAttribute, value)
+    m.options[attr.name] = value
     return
 end
 
@@ -206,26 +206,26 @@ end
 
 MOI.supports(::Optimizer, ::MOI.ObjectiveSense) = true
 
-MOI.get(model::Optimizer, ::MOI.ObjectiveSense) = model.objective_sense
+MOI.get(m::Optimizer, ::MOI.ObjectiveSense) = m.objective_sense
 
-function MOI.set(model::Optimizer, ::MOI.ObjectiveSense, sense::MOI.OptimizationSense)
-    model.objective_sense = sense
+function MOI.set(m::Optimizer, ::MOI.ObjectiveSense, sense::MOI.OptimizationSense)
+    m.objective_sense = sense
     return
 end
 
-function MOI.get(model::Optimizer, ::MOI.ObjectiveFunctionType)
-    return model.objective_function_type
+function MOI.get(m::Optimizer, ::MOI.ObjectiveFunctionType)
+    return m.objective_function_type
 end
 
-function MOI.get(model::Optimizer, ::MOI.ObjectiveFunction{F}) where {F}
-    if model.objective_function_type !== F
-        error("Objective function type is $(model.objective_function_type), not $F.")
+function MOI.get(m::Optimizer, ::MOI.ObjectiveFunction{F}) where {F}
+    if m.objective_function_type !== F
+        error("Objective function type is $(m.objective_function_type), not $F.")
     end
-    return model.objective_function::F
+    return m.objective_function::F
 end
 
 function MOI.set(
-    model::Optimizer,
+    m::Optimizer,
     ::MOI.ObjectiveFunction{F},
     f::F,
 ) where {
@@ -235,18 +235,18 @@ function MOI.set(
         MOI.ScalarAffineFunction{Int},
     },
 }
-    model.objective_function_type = F
-    model.objective_function = f
+    m.objective_function_type = F
+    m.objective_function = f
     return
 end
 
-function MOI.get(model::Optimizer, ::MOI.ListOfModelAttributesSet)
+function MOI.get(m::Optimizer, ::MOI.ListOfModelAttributesSet)
     attributes = Any[MOI.ObjectiveSense()]
-    typ = model.objective_function_type
+    typ = m.objective_function_type
     if typ !== nothing
         push!(attributes, MOI.ObjectiveFunction{typ}())
     end
-    if !isempty(model.name)
+    if !isempty(m.name)
         push!(attributes, MOI.Name())
     end
     return attributes
@@ -262,144 +262,129 @@ end
 
 # Apply Hexaly parameters (time limit, verbosity, raw options)
 
-function _apply_params!(model::Optimizer)
-    param = model.inner.param
-    tl =
-        model.time_limit === nothing ? _DEFAULT_TIME_LIMIT :
-        max(1, round(Int, model.time_limit))
-    param.time_limit = tl
-    param.verbosity = model.silent ? 0 : 1
-    for (k, v) in model.options
+function _apply_params!(m::Optimizer)
+    p = param(m.inner)
+    tl = m.time_limit === nothing ? _DEFAULT_TIME_LIMIT :
+        max(1, round(Int, m.time_limit))
+    time_limit!(p, tl)
+    verbosity!(p, m.silent ? 0 : 1)
+    for (k, v) in m.options
         try
-            setproperty!(param, Symbol(k), v)
-        catch
-            try
-                param.set_advanced_param(k, v)
-            catch err
-                @warn "Hexaly: could not set parameter $(k)=$(v)" error=err
-            end
+            set_param!(p, k, v)
+        catch err
+            @warn "Hexaly: could not set parameter $(k)=$(v)" error = err
         end
     end
     return
 end
 
-function _map_status(model::Optimizer, status::Py)
-    status_str = pyconvert(String, pystr(status))
-    # HxSolutionStatus: INCONSISTENT, INFEASIBLE, FEASIBLE, OPTIMAL
-    if occursin("OPTIMAL", status_str)
-        return MOI.OPTIMAL, MOI.FEASIBLE_POINT, status_str
-    elseif occursin("FEASIBLE", status_str)
-        return MOI.LOCALLY_SOLVED, MOI.FEASIBLE_POINT, status_str
-    elseif occursin("INFEASIBLE", status_str)
-        return MOI.INFEASIBLE, MOI.NO_SOLUTION, status_str
-    elseif occursin("INCONSISTENT", status_str)
-        return MOI.INFEASIBLE, MOI.NO_SOLUTION, status_str
+function _map_status(::Optimizer, status::Cint)
+    if status == HX_SS_OPTIMAL
+        return MOI.OPTIMAL, MOI.FEASIBLE_POINT, "OPTIMAL"
+    elseif status == HX_SS_FEASIBLE
+        return MOI.LOCALLY_SOLVED, MOI.FEASIBLE_POINT, "FEASIBLE"
+    elseif status == HX_SS_INFEASIBLE
+        return MOI.INFEASIBLE, MOI.NO_SOLUTION, "INFEASIBLE"
+    elseif status == HX_SS_INCONSISTENT
+        return MOI.INFEASIBLE, MOI.NO_SOLUTION, "INCONSISTENT"
     else
-        return MOI.OTHER_ERROR, MOI.NO_SOLUTION, status_str
+        return MOI.OTHER_ERROR, MOI.NO_SOLUTION, "UNKNOWN ($(Int(status)))"
     end
 end
 
 # Optimize
 
-function MOI.optimize!(model::Optimizer)
-    # Build objective (before closing the model).
-    # Hexaly requires at least one objective, even for feasibility problems,
-    # so we supply a constant zero objective when none is set.
-    if model.objective_function !== nothing &&
-       model.objective_sense != MOI.FEASIBILITY_SENSE
-        obj_expr = _build_objective_expression(model)
-        if model.objective_sense == MOI.MIN_SENSE
-            model.model.minimize(obj_expr)
+function MOI.optimize!(m::Optimizer)
+    # Build objective (before closing the model). Hexaly requires at least
+    # one objective, even for feasibility problems, so we supply a constant
+    # zero objective when none is set.
+    if m.objective_function !== nothing &&
+       m.objective_sense != MOI.FEASIBILITY_SENSE
+        obj_expr = _build_objective_expression(m)
+        if m.objective_sense == MOI.MIN_SENSE
+            minimize!(m.model, obj_expr)
         else
-            model.model.maximize(obj_expr)
+            maximize!(m.model, obj_expr)
         end
     else
-        model.model.minimize(model.model.create_constant(Py(0)))
+        minimize!(m.model, create_constant(m.model, 0))
     end
 
-    # Close the model (required before solving).
-    if !pyconvert(Bool, model.model.is_closed())
-        model.model.close()
+    if !is_closed(m.model)
+        close!(m.model)
     end
 
-    _apply_params!(model)
+    _apply_params!(m)
 
     try
-        model.inner.solve()
+        solve!(m.inner)
     catch err
-        model.termination_status = MOI.OTHER_ERROR
-        model.primal_status = MOI.NO_SOLUTION
-        model.raw_status_string = sprint(showerror, err)
-        model.solved = true
+        m.termination_status = MOI.OTHER_ERROR
+        m.primal_status = MOI.NO_SOLUTION
+        m.raw_status_string = sprint(showerror, err)
+        m.solved = true
         return
     end
 
-    status = model.inner.solution.status
-    t, p, s = _map_status(model, status)
-    model.termination_status = t
-    model.primal_status = p
-    model.raw_status_string = s
-    model.solved = true
+    sol = solution(m.inner)
+    status = solution_status(sol)
+    t, p, s = _map_status(m, status)
+    m.termination_status = t
+    m.primal_status = p
+    m.raw_status_string = s
+    m.solved = true
     return
 end
 
 # Solution getters
 
-MOI.get(model::Optimizer, ::MOI.TerminationStatus) = model.termination_status
+MOI.get(m::Optimizer, ::MOI.TerminationStatus) = m.termination_status
 
-function MOI.get(model::Optimizer, attr::MOI.PrimalStatus)
+function MOI.get(m::Optimizer, attr::MOI.PrimalStatus)
     if attr.result_index != 1
         return MOI.NO_SOLUTION
     end
-    return model.primal_status
+    return m.primal_status
 end
 
 MOI.get(::Optimizer, ::MOI.DualStatus) = MOI.NO_SOLUTION
 
-MOI.get(model::Optimizer, ::MOI.RawStatusString) = model.raw_status_string
+MOI.get(m::Optimizer, ::MOI.RawStatusString) = m.raw_status_string
 
-function MOI.get(model::Optimizer, ::MOI.ResultCount)
-    return model.primal_status == MOI.NO_SOLUTION ? 0 : 1
+function MOI.get(m::Optimizer, ::MOI.ResultCount)
+    return m.primal_status == MOI.NO_SOLUTION ? 0 : 1
 end
 
-function MOI.get(model::Optimizer, attr::MOI.VariablePrimal, vi::MOI.VariableIndex)
-    MOI.check_result_index_bounds(model, attr)
-    info = _info(model, vi)
-    val = info.variable.value
-    if info.is_integer
-        return pyconvert(Int, val)
-    else
-        return pyconvert(Float64, val)
-    end
+function MOI.get(m::Optimizer, attr::MOI.VariablePrimal, vi::MOI.VariableIndex)
+    MOI.check_result_index_bounds(m, attr)
+    info = _info(m, vi)
+    return value(info.variable; is_integer = info.is_integer)
 end
 
-function MOI.get(model::Optimizer, attr::MOI.ObjectiveValue)
-    MOI.check_result_index_bounds(model, attr)
-    if model.objective_function === nothing ||
-       model.objective_sense == MOI.FEASIBILITY_SENSE
+function MOI.get(m::Optimizer, attr::MOI.ObjectiveValue)
+    MOI.check_result_index_bounds(m, attr)
+    if m.objective_function === nothing ||
+       m.objective_sense == MOI.FEASIBILITY_SENSE
         return 0.0
     end
-    return _evaluate_objective(model)
+    return _evaluate_objective(m)
 end
 
-function _evaluate_objective(model::Optimizer)
-    f = model.objective_function
+function _evaluate_objective(m::Optimizer)
+    f = m.objective_function
     if f isa MOI.VariableIndex
-        info = _info(model, f)
-        val = info.variable.value
-        return info.is_integer ? pyconvert(Int, val) : pyconvert(Float64, val)
+        info = _info(m, f)
+        return value(info.variable; is_integer = info.is_integer)
     elseif f isa MOI.ScalarNonlinearFunction
         # Hexaly's first objective expression carries the solved value.
-        return pyconvert(Float64, model.model.get_objective(Py(0)).value)
+        return value(get_objective(m.model, 0); is_integer = false)
     else
         # ScalarAffineFunction
         T = typeof(f).parameters[1]
         val = f.constant
         for t in f.terms
-            info = _info(model, t.variable)
-            v =
-                info.is_integer ? pyconvert(Int, info.variable.value) :
-                pyconvert(Float64, info.variable.value)
+            info = _info(m, t.variable)
+            v = value(info.variable; is_integer = info.is_integer)
             val += t.coefficient * v
         end
         if T <: Integer
@@ -409,24 +394,24 @@ function _evaluate_objective(model::Optimizer)
     end
 end
 
-function MOI.get(model::Optimizer, ::MOI.SolveTimeSec)
-    if !model.solved
+function MOI.get(m::Optimizer, ::MOI.SolveTimeSec)
+    if !m.solved
         return 0.0
     end
-    return Float64(pyconvert(Int, model.inner.statistics.running_time))
+    return running_time(statistics(m.inner))
 end
 
 # Number of variables / constraints (MOI bookkeeping)
 
-MOI.get(model::Optimizer, ::MOI.NumberOfVariables) = length(model.variable_info)
+MOI.get(m::Optimizer, ::MOI.NumberOfVariables) = length(m.variable_info)
 
-function MOI.get(model::Optimizer, ::MOI.ListOfVariableIndices)
-    return sort!(collect(keys(model.variable_info)); by = v -> v.value)
+function MOI.get(m::Optimizer, ::MOI.ListOfVariableIndices)
+    return sort!(collect(keys(m.variable_info)); by = v -> v.value)
 end
 
-function MOI.get(model::Optimizer, ::MOI.NumberOfConstraints{F,S}) where {F,S}
+function MOI.get(m::Optimizer, ::MOI.NumberOfConstraints{F,S}) where {F,S}
     n = 0
-    for (_, info) in model.constraint_info
+    for (_, info) in m.constraint_info
         if info.f isa F && info.set isa S
             n += 1
         end
@@ -434,9 +419,9 @@ function MOI.get(model::Optimizer, ::MOI.NumberOfConstraints{F,S}) where {F,S}
     return n
 end
 
-function MOI.get(model::Optimizer, ::MOI.ListOfConstraintIndices{F,S}) where {F,S}
+function MOI.get(m::Optimizer, ::MOI.ListOfConstraintIndices{F,S}) where {F,S}
     indices = MOI.ConstraintIndex{F,S}[]
-    for (ci, info) in model.constraint_info
+    for (ci, info) in m.constraint_info
         if info.f isa F && info.set isa S
             push!(indices, ci)
         end
@@ -444,9 +429,9 @@ function MOI.get(model::Optimizer, ::MOI.ListOfConstraintIndices{F,S}) where {F,
     return sort!(indices; by = c -> c.value)
 end
 
-function MOI.get(model::Optimizer, ::MOI.ListOfConstraintTypesPresent)
+function MOI.get(m::Optimizer, ::MOI.ListOfConstraintTypesPresent)
     types = Set{Tuple{Type,Type}}()
-    for (_, info) in model.constraint_info
+    for (_, info) in m.constraint_info
         push!(types, (typeof(info.f), typeof(info.set)))
     end
     return collect(types)
