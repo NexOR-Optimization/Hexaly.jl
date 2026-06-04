@@ -5,10 +5,12 @@ authors = ["Benoît Legat <benoit.legat@gmail.com>"]
 
 [deps]
 CEnum = "fa961155-64e5-5f13-b03f-caf6b980ea82"
+Downloads = "f43a241f-c20a-4ad4-852c-f6b1247861c6"
 JuMP = "4076af6c-e467-56ae-b986-b466b2749572"
 Libdl = "8f399da3-3557-5675-b5ff-fb832c97cbdb"
 MathOptInterface = "b8f27783-ece8-5eb3-8dc8-9495eed66fee"
 MathOptVRP = "ee161a15-0030-435c-8c62-bd8c501c3551"
+Pkg = "44cfe95a-1eb2-52ea-b672-e2afdf69b78f"
 
 [compat]
 CEnum = "0.5"

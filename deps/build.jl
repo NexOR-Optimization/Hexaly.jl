@@ -8,6 +8,8 @@
 # `Gurobi.jl/deps/build.jl`.
 
 using Libdl
+using Downloads
+import Pkg.PlatformEngines: exe7z
 
 const DEPS_FILE = joinpath(@__DIR__, "deps.jl")
 
@@ -82,6 +84,81 @@ function _try_local_install()
             return true
         end
     end
+    return false
+end
+
+# Fallback used when no local install is found. Hexaly publishes wheels on
+# `pip.hexaly.com` that bundle `libhexaly14X.{so,dylib,dll}` alongside the
+# Python files. A wheel is just a PEP 491 zip archive, so we fetch and
+# extract it directly — no Python interpreter required. Opt out with
+# `HEXALY_JL_NO_AUTOINSTALL=1`.
+function _wheel_platform_tag()
+    Sys.iswindows() && return "win_amd64"
+    if Sys.islinux()
+        return Sys.ARCH === :aarch64 ? "linux_aarch64" : "linux_x86_64"
+    end
+    if Sys.isapple()
+        return Sys.ARCH === :aarch64 ? "macosx_.*_arm64" : "macosx_.*_x86_64"
+    end
+    return nothing
+end
+
+function _try_wheel_download(target_dir)
+    tag = _wheel_platform_tag()
+    tag === nothing && return false
+    # Fetch the directory index from `https://pip.hexaly.com/hexaly/` and
+    # pick the newest wheel whose platform tag matches.
+    index = try
+        buf = IOBuffer()
+        Downloads.download("https://pip.hexaly.com/hexaly/", buf)
+        String(take!(buf))
+    catch err
+        @warn "Hexaly: could not fetch pip.hexaly.com index" error = err
+        return false
+    end
+    rgx = Regex("hexaly-[0-9.]+-[^\"]+-$(tag)\\.whl")
+    candidates = unique!([m.match for m in eachmatch(rgx, index)])
+    isempty(candidates) && return false
+    sort!(candidates; rev = true)  # lexicographic = newest first for this scheme
+    wheel = first(candidates)
+    wheel_path = joinpath(target_dir, wheel)
+    @info "Hexaly: downloading $wheel from pip.hexaly.com"
+    try
+        Downloads.download("https://pip.hexaly.com/hexaly/$wheel", wheel_path)
+    catch err
+        @warn "Hexaly: wheel download failed" error = err
+        return false
+    end
+    # Wheels are PEP 491 zip archives. Julia ships its own `7z` binary that
+    # handles them cross-platform.
+    try
+        run(`$(exe7z()) x -y -o$target_dir $wheel_path`)
+    catch err
+        @warn "Hexaly: wheel unpack failed" error = err
+        return false
+    end
+    return true
+end
+
+function _try_auto_install()
+    haskey(ENV, "HEXALY_JL_NO_AUTOINSTALL") && return false
+    target_dir = joinpath(first(DEPOT_PATH), "scratchspaces",
+                          "4e695617-bd00-4489-bcc8-8e79e7638cb7", "hexaly_wheel")
+    mkpath(target_dir)
+    @info "Hexaly: downloading official Hexaly binary from pip.hexaly.com into $target_dir"
+    _try_wheel_download(target_dir) || return false
+    pkg_dir = joinpath(target_dir, "hexaly")
+    for a in ALIASES
+        for ext in (".so", ".dylib", ".dll")
+            path = joinpath(pkg_dir, "lib$a$ext")
+            isfile(path) || (path = joinpath(pkg_dir, "$a$ext"))
+            if isfile(path) && Libdl.dlopen_e(path) != C_NULL
+                write_depsfile(path)
+                return true
+            end
+        end
+    end
+    @warn "Hexaly: auto-install succeeded but no libhexaly* found in $pkg_dir"
     return false
 end
 
@@ -168,7 +245,7 @@ if haskey(ENV, "HEXALY_JL_SKIP_LIB_CHECK")
 elseif get(ENV, "JULIA_REGISTRYCI_AUTOMERGE", "false") == "true"
     write_depsfile("__skipped_installation__")
 else
-    if !_try_local_install()
+    if !_try_local_install() && !_try_auto_install()
         diagnose_hexaly_install()
     end
 end
