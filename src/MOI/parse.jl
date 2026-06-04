@@ -1,57 +1,52 @@
 # Helpers to translate MOI functions and variable collections into Hexaly
-# Python expressions.
+# C-API expressions.
 
-function _parse_to_vars(model::Optimizer, f::MOI.VectorOfVariables)
-    return Py[_info(model, v).variable for v in f.variables]
+function _parse_to_vars(m::Optimizer, f::MOI.VectorOfVariables)
+    return HxExpression[_info(m, v).variable for v in f.variables]
 end
 
 # Build a Hexaly expression representing the linear function
 # `sum(c_i * x_i) + constant`.
 function _build_linear_expression(
-    model::Optimizer,
+    m::Optimizer,
     f::MOI.ScalarAffineFunction{T},
 ) where {T<:Real}
     f = MOI.Utilities.canonical(f)
-    m = model.model
-    terms = f.terms
-    # Build individual coefficient*variable terms.
-    term_exprs = Py[]
-    for t in terms
-        v = _info(model, t.variable).variable
+    md = m.model
+    term_exprs = HxExpression[]
+    for t in f.terms
+        v = _info(m, t.variable).variable
         c = t.coefficient
         if isone(c)
             push!(term_exprs, v)
         else
-            push!(term_exprs, m.prod(_py_number(T, c), v))
+            push!(term_exprs, prod(md, _num(T, c), v))
         end
     end
 
     if isempty(term_exprs)
-        return m.create_constant(_py_number(T, f.constant))
+        return create_constant(md, _num(T, f.constant))
     end
 
-    s = length(term_exprs) == 1 ? term_exprs[1] : m.sum(term_exprs...)
+    s = length(term_exprs) == 1 ? term_exprs[1] : sum(md, term_exprs...)
     if !iszero(f.constant)
-        s = m.sum(s, m.create_constant(_py_number(T, f.constant)))
+        s = sum(md, s, create_constant(md, _num(T, f.constant)))
     end
     return s
 end
 
-# Convert a numeric scalar to the Python representation Hexaly expects.
-# Integers are preserved to avoid unnecessary double-expressions.
-_py_number(::Type{T}, x) where {T<:Integer} = Py(round(Int, x))
-_py_number(::Type{T}, x) where {T} = Py(Float64(x))
+# Numeric scalar coercion. Integer coefficients stay integer so Hexaly can
+# keep an integer-domain objective when possible.
+_num(::Type{T}, x) where {T<:Integer} = round(Int, x)
+_num(::Type{T}, x) where {T} = Float64(x)
 
-_py_int(x::Real) = Py(round(Int, x))
-_py_float(x::Real) = Py(Float64(x))
-
-function _build_objective_expression(model::Optimizer)
-    f = model.objective_function
+function _build_objective_expression(m::Optimizer)
+    f = m.objective_function
     if f isa MOI.VariableIndex
-        return _info(model, f).variable
+        return _info(m, f).variable
     elseif f isa MOI.ScalarNonlinearFunction
-        return _build_sum_distances_expression(model, f)
+        return _build_sum_distances_expression(m, f)
     else
-        return _build_linear_expression(model, f)
+        return _build_linear_expression(m, f)
     end
 end

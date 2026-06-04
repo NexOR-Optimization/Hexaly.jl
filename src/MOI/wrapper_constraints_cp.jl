@@ -1,8 +1,9 @@
 # CP constraints implemented as Hexaly expressions.
 
-# AllDifferent — Hexaly's `distinct` on an array is an operator, not a
-# boolean constraint, so we encode AllDifferent as a conjunction of pairwise
-# `neq` expressions, which are boolean and can be constrained directly.
+# AllDifferent — Hexaly's `distinct` is an operator over a *list* decision
+# variable, not a boolean constraint on individual variables. We encode
+# AllDifferent as a conjunction of pairwise `neq` expressions, which are
+# boolean and can be constrained directly.
 
 function MOI.supports_constraint(
     ::Optimizer,
@@ -12,28 +13,22 @@ function MOI.supports_constraint(
     return true
 end
 
-function _build_constraint(model::Optimizer, f::MOI.VectorOfVariables, ::MOI.AllDifferent)
-    vars = _parse_to_vars(model, f)
-    m = model.model
+function _build_constraint(m::Optimizer, f::MOI.VectorOfVariables, ::MOI.AllDifferent)
+    vars = _parse_to_vars(m, f)
+    md = m.model
     n = length(vars)
     if n <= 1
-        return m.create_constant(Py(1))
+        return create_constant(md, 1)
     end
-    pairs = Py[]
+    pairs = HxExpression[]
     for i = 1:n, j = (i+1):n
-        push!(pairs, m.neq(vars[i], vars[j]))
+        push!(pairs, neq(md, vars[i], vars[j]))
     end
-    return length(pairs) == 1 ? pairs[1] : m.and_(pairs...)
+    return length(pairs) == 1 ? pairs[1] : and_(md, pairs...)
 end
 
-# Circuit — Hexaly uses list decision variables for circuits, but we can
-# express it on integer variables via: `distinct(x)` on 1..n together with
-# a connectivity constraint. For simplicity we encode it as a conjunction:
-# - all next[i] distinct
-# - starting from node 1, following next exactly n steps returns to 1
-# MOI's `Circuit` uses 1-based indices so x[i] ∈ {1..n}.
-# We use an iterative reachability formulation:
-#   visit[0] = 1, visit[k+1] = next[visit[k]], and visit[n] = 1.
+# Circuit — encoded via a reachability formulation. See the original Python
+# version for the exact construction.
 
 function MOI.supports_constraint(
     ::Optimizer,
@@ -43,43 +38,34 @@ function MOI.supports_constraint(
     return true
 end
 
-function _build_constraint(model::Optimizer, f::MOI.VectorOfVariables, s::MOI.Circuit)
-    vars = _parse_to_vars(model, f)
-    m = model.model
+function _build_constraint(m::Optimizer, f::MOI.VectorOfVariables, s::MOI.Circuit)
+    vars = _parse_to_vars(m, f)
+    md = m.model
     n = length(vars)
-    # MOI: x[i] ∈ 1..n denotes successor (1-based).
-    # Hexaly at-indexing is 0-based, so we use `x[i] - 1`.
-    shifted = Py[m.sub(v, Py(1)) for v in vars]
-    pairs = Py[]
-    # Domain: x[i] ∈ 1..n (implicitly required by MOI.Circuit)
+    shifted = HxExpression[sub(md, v, 1) for v in vars]
+    pairs = HxExpression[]
     for v in vars
-        push!(pairs, m.geq(v, Py(1)))
-        push!(pairs, m.leq(v, Py(n)))
+        push!(pairs, geq(md, v, 1))
+        push!(pairs, leq(md, v, n))
     end
-    # All successors distinct (pairwise neq).
     for i = 1:n, j = (i+1):n
-        push!(pairs, m.neq(shifted[i], shifted[j]))
+        push!(pairs, neq(md, shifted[i], shifted[j]))
     end
-    # Reachability: walk the successor array starting at node 0 and require
-    # that after k < n steps the walk has not yet returned to 0, and after n
-    # steps it has. Combined with distinctness this rules out sub-cycles and
-    # forces a single Hamiltonian circuit.
-    arr = m.array(pylist(shifted))
-    cur = Py(0)
+    arr = array(md, shifted)
+    cur::Union{Int,HxExpression} = 0
     for k = 1:n
-        cur = m.at(arr, cur)
+        cur = at(md, arr, cur)
         if k < n
-            push!(pairs, m.neq(cur, Py(0)))
+            push!(pairs, neq(md, cur, 0))
         else
-            push!(pairs, m.eq(cur, Py(0)))
+            push!(pairs, eq(md, cur, 0))
         end
     end
-    return length(pairs) == 1 ? pairs[1] : m.and_(pairs...)
+    return length(pairs) == 1 ? pairs[1] : and_(md, pairs...)
 end
 
-# BinPacking — Hexaly models bin packing via load constraints.
-# For each bin b, sum of weights of items assigned to b ≤ capacity.
-# MOI bins are 1-indexed; Hexaly is 0-indexed when using `at`.
+# BinPacking — sum of weights of items assigned to bin b ≤ capacity, for
+# every bin.
 
 function MOI.supports_constraint(
     ::Optimizer,
@@ -90,19 +76,18 @@ function MOI.supports_constraint(
 end
 
 function _build_constraint(
-    model::Optimizer,
+    m::Optimizer,
     f::MOI.VectorOfVariables,
     s::MOI.BinPacking{T},
 ) where {T<:Real}
-    vars = _parse_to_vars(model, f)
-    m = model.model
+    vars = _parse_to_vars(m, f)
+    md = m.model
     weights = s.weights
     capacity = s.capacity
     n_items = length(vars)
-    # Determine number of bins from the item variables' upper bounds.
     max_bin = 0
     for vi in f.variables
-        info = _info(model, vi)
+        info = _info(m, vi)
         ub = info.ub
         if ub === nothing
             ub = n_items
@@ -110,23 +95,21 @@ function _build_constraint(
         max_bin = max(max_bin, round(Int, ub))
     end
     n_bins = max_bin
-    # For each bin b (1..n_bins), sum_{i: x[i]==b} weights[i] ≤ capacity
-    # Build using indicator: sum_i weights[i] * (x[i] == b) ≤ capacity
-    and_terms = Py[]
+    and_terms = HxExpression[]
     for b = 1:n_bins
-        indicators = Py[]
+        indicators = HxExpression[]
         for i = 1:n_items
-            ind = m.eq(vars[i], Py(b))
-            push!(indicators, m.prod(Py(round(Int, weights[i])), ind))
+            ind = eq(md, vars[i], b)
+            push!(indicators, prod(md, round(Int, weights[i]), ind))
         end
-        load = m.sum(indicators...)
-        push!(and_terms, m.leq(load, Py(round(Int, capacity))))
+        load = sum(md, indicators...)
+        push!(and_terms, leq(md, load, round(Int, capacity)))
     end
-    return length(and_terms) == 1 ? and_terms[1] : m.and_(and_terms...)
+    return length(and_terms) == 1 ? and_terms[1] : and_(md, and_terms...)
 end
 
 # Table — `x ∈ Table(tbl)` iff there exists a row r such that x[c] == tbl[r,c]
-# for all c. Encoded as `or_(and_(eq(x[c], tbl[r,c]) for c) for r)`.
+# for all c.
 
 function MOI.supports_constraint(
     ::Optimizer,
@@ -137,22 +120,22 @@ function MOI.supports_constraint(
 end
 
 function _build_constraint(
-    model::Optimizer,
+    m::Optimizer,
     f::MOI.VectorOfVariables,
     s::MOI.Table{T},
 ) where {T<:Real}
-    vars = _parse_to_vars(model, f)
-    m = model.model
+    vars = _parse_to_vars(m, f)
+    md = m.model
     tbl = s.table
     nrows, ncols = size(tbl)
     @assert ncols == length(vars)
     if nrows == 0
-        return m.create_constant(Py(0))
+        return create_constant(md, 0)
     end
-    row_exprs = Py[]
+    row_exprs = HxExpression[]
     for r = 1:nrows
-        eqs = Py[m.eq(vars[c], Py(round(Int, tbl[r, c]))) for c = 1:ncols]
-        push!(row_exprs, length(eqs) == 1 ? eqs[1] : m.and_(eqs...))
+        eqs = HxExpression[eq(md, vars[c], round(Int, tbl[r, c])) for c = 1:ncols]
+        push!(row_exprs, length(eqs) == 1 ? eqs[1] : and_(md, eqs...))
     end
-    return length(row_exprs) == 1 ? row_exprs[1] : m.or_(row_exprs...)
+    return length(row_exprs) == 1 ? row_exprs[1] : or_(md, row_exprs...)
 end

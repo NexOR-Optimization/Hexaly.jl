@@ -1,6 +1,5 @@
 using JuMP
 using Hexaly
-using PythonCall
 using Test
 import MathOptInterface as MOI
 import MathOptVRP
@@ -15,10 +14,8 @@ function _hexaly_read_routes(model, nodes)
     routes = Vector{Int}[]
     for i = 1:size(nodes, 2)
         vi = JuMP.index(nodes[1, i])
-        list_py = inner.variable_info[vi].parent_list::PythonCall.Py
-        list_val = list_py.value
-        c = pyconvert(Int, list_val.count())
-        push!(routes, [pyconvert(Int, list_val[Py(k)]) for k = 0:(c-1)])
+        list_expr = inner.variable_info[vi].parent_list::Hexaly.HxExpression
+        push!(routes, Hexaly.collection_value(list_expr))
     end
     return routes
 end
