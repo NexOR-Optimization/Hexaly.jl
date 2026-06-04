@@ -365,8 +365,8 @@ double_value(s::HxSolution, e::HxExpression) =
 # Convenience for the common pattern `e.value` on the optimizer.
 # When `is_integer` is not passed, the value type is auto-detected via
 # `hx_expr_type` (HXVT_INT vs HXVT_DOUBLE). The explicit keyword override
-# is kept for sites that already know the type.
-const HXVT_INT = 2
+# is kept for sites that already know the type. `HXVT_INT` is the
+# `hxvaluetype` enum member defined in `gen/libhexaly.jl`.
 
 function value(e::HxExpression; is_integer::Union{Bool,Nothing} = nothing)
     sol = hx_best_solution(e.opt.ptr)
