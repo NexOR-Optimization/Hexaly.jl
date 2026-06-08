@@ -14,6 +14,7 @@ Pkg = "44cfe95a-1eb2-52ea-b672-e2afdf69b78f"
 
 [compat]
 CEnum = "0.5"
+Downloads = "1.6"
 JuMP = "1.30.1"
 MathOptInterface = "1"
 MathOptVRP = "0.1"
