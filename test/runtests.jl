@@ -68,8 +68,8 @@ const HAS_LICENSE = Hexaly.has_license()
         include("sudoku.jl")
         include("knapsack.jl")
         # The VRP-variant JuMP tests live in `MathOptVRP`'s Test extension
-        # and are run through `MathOptVRP.runtests` here with a Hexaly-
-        # specific route reader. See `test/jump.jl` for that wiring.
+        # and are run through `MathOptVRP.Tests.runtests` here with a
+        # Hexaly-specific route reader. See `test/jump.jl` for that wiring.
         include("jump.jl")
     end
 end

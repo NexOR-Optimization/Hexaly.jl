@@ -20,4 +20,4 @@ function _hexaly_read_routes(model, nodes)
     return routes
 end
 
-MathOptVRP.runtests(Hexaly.Optimizer; read_routes = _hexaly_read_routes)
+MathOptVRP.Tests.runtests(Hexaly.Optimizer; read_routes = _hexaly_read_routes)
