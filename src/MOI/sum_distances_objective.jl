@@ -36,7 +36,7 @@ function _build_sum_distances_expression(m::Optimizer, f::MOI.ScalarNonlinearFun
     )
     dist_matrix = f.args[1]::AbstractMatrix{<:Real}
     nodes_raw = f.args[2]
-    items = _normalize_sum_distances_items(nodes_raw)
+    items = _shift_to_zero_based!(_normalize_sum_distances_items(nodes_raw))
 
     md = m.model
     n_rows = size(dist_matrix, 1)
@@ -115,6 +115,32 @@ function _vector_affine_to_items(f::MOI.VectorAffineFunction)
         items[i] = _simplify_item(MOI.ScalarAffineFunction(per_row[i], f.constants[i]))
     end
     return items
+end
+
+# `MathOptVRP` node values are 1-based, like the rest of MOI, while Hexaly's
+# `list` decision variables take values in `0:n-1` and index arrays 0-based.
+# The `ZeroBasedBridge` of `bridges.jl` substituted every node variable by
+# `y + 1`, so taking that one back out recovers the raw Hexaly variable and,
+# for a constant node such as a depot, the 0-based index.
+function _shift_to_zero_based!(items, from::Int = 1)
+    for k = from:length(items)
+        items[k] = _zero_based(items[k])
+    end
+    return items
+end
+
+_zero_based(x::Real) = x - 1
+
+function _zero_based(f::MOI.ScalarAffineFunction)
+    return _simplify_item(MOI.ScalarAffineFunction(f.terms, f.constant - 1))
+end
+
+function _zero_based(vi::MOI.VariableIndex)
+    return error(
+        "Hexaly: the node variable `$vi` was not offset by `Hexaly.ZeroBasedBridge`. ",
+        "Use `MOI.instantiate(Hexaly.Optimizer; with_bridge_type = Float64)` or ",
+        "`JuMP.Model(Hexaly.Optimizer)` so that the bridge is added.",
+    )
 end
 
 _simplify_item(x) = x

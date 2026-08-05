@@ -139,6 +139,13 @@ function MOI.get(::Optimizer, ::MOI.SolverVersion)
     return string(version())
 end
 
+# The optimizer only supports the 0-based sets of `sets.jl`; users write
+# their model with the 1-based `MathOptVRP` sets and these bridges do the
+# conversion. See `bridges.jl`.
+function MOI.get(::Optimizer, ::MOI.Bridges.ListOfNonstandardBridges{T}) where {T}
+    return Type[ListBridge{T}, PartitionBridge{T}, PartitionPDBridge{T}]
+end
+
 # Name
 
 function MOI.supports(::Optimizer, ::MOI.Name)

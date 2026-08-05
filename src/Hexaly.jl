@@ -73,6 +73,8 @@ include("MOI/wrapper_constraints.jl")
 include("MOI/wrapper_constraints_singlevar.jl")
 include("MOI/wrapper_constraints_linear.jl")
 include("MOI/wrapper_constraints_cp.jl")
+include("MOI/sets.jl")
+include("MOI/bridges.jl")
 include("MOI/list.jl")
 include("MOI/sum_distances_objective.jl")
 
