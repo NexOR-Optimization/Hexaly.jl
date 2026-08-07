@@ -5,17 +5,30 @@
 
 # Create `n` MOI variables backed by `hx_list[0..n-1]`, each tagged with
 # `parent_list = hx_list` so the objective handler can recover the list.
+#
+# A list may be shorter than `n` (the parts of a partition have a variable
+# count), but the MOI variables exist for every position, so the ones past
+# `count()` have to report something. Hexaly's `at` answers `0` there, which
+# is a node like any other, so we substitute `-1`: the `ZeroBasedBridge`
+# adds one to it and `MathOptVRP` sees the `0` that marks the end of the
+# sequence.
 function _add_list_variables!(m::Optimizer, hx_list::HxExpression, n::Int)
+    md = m.model
     indices = MOI.VariableIndex[]
     for i = 0:(n-1)
-        elem = at(m.model, hx_list, i)
+        elem = iif(
+            md,
+            lt(md, i, count_(md, hx_list)),
+            at(md, hx_list, i),
+            -1,
+        )
         info = VariableInfo(
             MOI.VariableIndex(0),
             elem;
             is_integer = true,
             parent_list = hx_list,
         )
-        info.lb = 0.0
+        info.lb = -1.0
         info.ub = Float64(n - 1)
         idx = MOI.Utilities.CleverDicts.add_item(m.variable_info, info)
         _info(m, idx).index = idx
@@ -120,6 +133,18 @@ function MOI.supports_constraint(
     ::Type{<:MathOptVRP.TimeWindows},
 )
     return true
+end
+
+# These sets constrain node variables that a `Partition` / `PartitionPD`
+# already created; they cannot create any. Without this, MOI's default
+# infers `supports_add_constrained_variables` from the `VectorOfVariables`
+# constraint above and `copy_to` builds the variables from this set instead
+# of from the partition, leaving them without a backing Hexaly list.
+function MOI.supports_add_constrained_variables(
+    ::Optimizer,
+    ::Type{<:MathOptVRP.TimeWindows},
+)
+    return false
 end
 
 function MOI.add_constraint(
@@ -231,6 +256,18 @@ function MOI.supports_constraint(
     return true
 end
 
+# These sets constrain node variables that a `Partition` / `PartitionPD`
+# already created; they cannot create any. Without this, MOI's default
+# infers `supports_add_constrained_variables` from the `VectorOfVariables`
+# constraint above and `copy_to` builds the variables from this set instead
+# of from the partition, leaving them without a backing Hexaly list.
+function MOI.supports_add_constrained_variables(
+    ::Optimizer,
+    ::Type{<:MathOptVRP.Capacity},
+)
+    return false
+end
+
 function MOI.add_constraint(
     m::Optimizer,
     f::Union{MOI.VectorOfVariables,MOI.VectorAffineFunction},
@@ -296,6 +333,18 @@ function MOI.supports_constraint(
     ::Type{<:MathOptVRP.CapacitatedTimeWindows},
 )
     return true
+end
+
+# These sets constrain node variables that a `Partition` / `PartitionPD`
+# already created; they cannot create any. Without this, MOI's default
+# infers `supports_add_constrained_variables` from the `VectorOfVariables`
+# constraint above and `copy_to` builds the variables from this set instead
+# of from the partition, leaving them without a backing Hexaly list.
+function MOI.supports_add_constrained_variables(
+    ::Optimizer,
+    ::Type{<:MathOptVRP.CapacitatedTimeWindows},
+)
+    return false
 end
 
 function MOI.add_constraint(
