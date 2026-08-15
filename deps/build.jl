@@ -3,7 +3,7 @@
 # Use of this source code is governed by an MIT-style license that can be found
 # in the LICENSE.md file or at https://opensource.org/licenses/MIT.
 #
-# Locate `libhexaly145.so` (.dylib / .dll on macOS / Windows) and emit
+# Locate `libhexaly150.so` (.dylib / .dll on macOS / Windows) and emit
 # `deps.jl` with `const libhexaly = "..."`. Mirrors the layout used by
 # `Gurobi.jl/deps/build.jl`.
 
@@ -29,14 +29,14 @@ function write_depsfile(path)
 end
 
 # Supported `libhexaly` aliases, newest first. The number is the same as in
-# `hx_version_code()` (major*10 + minor), so `145` is Hexaly 14.5.
-const ALIASES = ["hexaly145", "hexaly144", "hexaly143", "hexaly142",
+# `hx_version_code()` (major*10 + minor), so `150` is Hexaly 15.0.
+const ALIASES = ["hexaly150", "hexaly145", "hexaly144", "hexaly143", "hexaly142",
                  "hexaly141", "hexaly140", "hexaly135"]
 
 # Versioned directories the `.run` installer creates on Linux (and the
 # matching `/Library/...` / `C:\Program Files\...` defaults elsewhere).
-const VERSION_DIRS = ["hexaly_14_5", "hexaly_14_4", "hexaly_14_3", "hexaly_14_2",
-                      "hexaly_14_1", "hexaly_14_0", "hexaly_13_5"]
+const VERSION_DIRS = ["hexaly_15_0", "hexaly_14_5", "hexaly_14_4", "hexaly_14_3",
+                      "hexaly_14_2", "hexaly_14_1", "hexaly_14_0", "hexaly_13_5"]
 
 function _candidate_paths()
     paths = String[]
@@ -88,7 +88,7 @@ function _try_local_install()
 end
 
 # Fallback used when no local install is found. Hexaly publishes wheels on
-# `pip.hexaly.com` that bundle `libhexaly14X.{so,dylib,dll}` alongside the
+# `pip.hexaly.com` that bundle `libhexaly15X.{so,dylib,dll}` alongside the
 # Python files. A wheel is just a PEP 491 zip archive, so we fetch and
 # extract it directly — no Python interpreter required. Opt out with
 # `HEXALY_JL_NO_AUTOINSTALL=1`.
@@ -169,20 +169,20 @@ function _print_HEXALY_HOME_help()
 
     ```
     # On Linux, this might be:
-    ENV["HEXALY_HOME"] = "/opt/hexaly_14_5"
+    ENV["HEXALY_HOME"] = "/opt/hexaly_15_0"
 
     # On macOS:
-    ENV["HEXALY_HOME"] = "/Library/hexaly_14_5"
+    ENV["HEXALY_HOME"] = "/Library/hexaly_15_0"
 
     # On Windows:
-    ENV["HEXALY_HOME"] = "C:\\\\Program Files\\\\hexaly_14_5"
+    ENV["HEXALY_HOME"] = "C:\\\\Program Files\\\\hexaly_15_0"
 
     import Pkg
     Pkg.build("Hexaly")
     ```
 
     The `HEXALY_HOME` directory should contain a `bin/` subdirectory with
-    `libhexaly145.so` / `libhexaly145.dylib` / `hexaly145.dll`.
+    `libhexaly150.so` / `libhexaly150.dylib` / `hexaly150.dll`.
     """)
 end
 
@@ -217,7 +217,7 @@ function diagnose_hexaly_install()
             println("""
 
             We were looking for (but could not find) a file named like
-            `libhexaly145.so`, `libhexaly145.dylib`, or `hexaly145.dll`.
+            `libhexaly150.so`, `libhexaly150.dylib`, or `hexaly150.dll`.
             """)
         catch ex
             if ex isa SystemError

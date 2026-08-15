@@ -93,7 +93,13 @@ mutable struct HexalyOptimizer
     ptr::hxoptimizer
     function HexalyOptimizer()
         ptr = hx_create_optimizer()
-        ptr == C_NULL && error("hx_create_optimizer returned NULL")
+        if ptr == C_NULL
+            err = Ref{hxerror}()
+            if hx_check_last_error(err)
+                error("hx_create_optimizer failed: $(unsafe_string(err[].message))")
+            end
+            error("hx_create_optimizer returned NULL")
+        end
         opt = new(ptr)
         finalizer(opt) do o
             if o.ptr != C_NULL

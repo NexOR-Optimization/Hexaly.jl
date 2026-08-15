@@ -53,7 +53,7 @@ function has_license()
     path = get(ENV, "HX_LICENSE_PATH", "")
     !isempty(path) && isfile(path) && return true
     isfile("license.dat") && return true
-    for ver in ("14_5", "14_4", "14_3", "14_2", "14_1", "14_0", "13_5")
+    for ver in ["15_0", "14_5", "14_4", "14_3", "14_2", "14_1", "14_0", "13_5"]
         isfile(joinpath("/opt", "hexaly_$(ver)", "license.dat")) && return true
     end
     return false
