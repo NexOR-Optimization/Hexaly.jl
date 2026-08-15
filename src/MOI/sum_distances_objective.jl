@@ -36,7 +36,7 @@ function _build_sum_distances_expression(m::Optimizer, f::MOI.ScalarNonlinearFun
     )
     dist_matrix = f.args[1]::AbstractMatrix{<:Real}
     nodes_raw = f.args[2]
-    items = _normalize_sum_distances_items(nodes_raw)
+    items = _shift_to_zero_based!(_normalize_sum_distances_items(nodes_raw))
 
     md = m.model
     n_rows = size(dist_matrix, 1)
@@ -116,6 +116,25 @@ function _vector_affine_to_items(f::MOI.VectorAffineFunction)
     end
     return items
 end
+
+# `MathOptVRP` node values are 1-based, while Hexaly lists and arrays are
+# 0-based. List variables retain their identity here because the specialized
+# lowering paths below access their raw parent list; constants are shifted for
+# Hexaly array indexing.
+function _shift_to_zero_based!(items, from::Int = 1)
+    for k = from:length(items)
+        items[k] = _zero_based(items[k])
+    end
+    return items
+end
+
+_zero_based(x::Real) = x - 1
+
+function _zero_based(f::MOI.ScalarAffineFunction)
+    return _simplify_item(MOI.ScalarAffineFunction(f.terms, f.constant - 1))
+end
+
+_zero_based(vi::MOI.VariableIndex) = vi
 
 _simplify_item(x) = x
 function _simplify_item(f::MOI.ScalarAffineFunction)

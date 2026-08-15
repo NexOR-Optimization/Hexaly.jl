@@ -1,14 +1,22 @@
-# Hexaly-specific implementations of the `MathOptVRP` vector sets. The set
-# definitions, JuMP `build_variable` overloads and `MOI.dimension` methods
-# live in `MathOptVRP`; here we only provide the `MOI.add_constrained_variables`
-# / `MOI.add_constraint` methods that realise each set with Hexaly's C API.
+# Realisation of the 1-based MathOptVRP routing sets with Hexaly's C API.
 
 # Create `n` MOI variables backed by `hx_list[0..n-1]`, each tagged with
 # `parent_list = hx_list` so the objective handler can recover the list.
+#
+# A list may be shorter than `n` (the parts of a partition have a variable
+# count), but the MOI variables exist for every position. The trailing zero
+# is MathOptVRP's sentinel; real Hexaly list elements are offset by one.
 function _add_list_variables!(m::Optimizer, hx_list::HxExpression, n::Int)
+    md = m.model
     indices = MOI.VariableIndex[]
     for i = 0:(n-1)
-        elem = at(m.model, hx_list, i)
+        raw_elem = iif(
+            md,
+            lt(md, i, count_(md, hx_list)),
+            at(md, hx_list, i),
+            -1,
+        )
+        elem = sum(md, raw_elem, 1)
         info = VariableInfo(
             MOI.VariableIndex(0),
             elem;
@@ -16,7 +24,7 @@ function _add_list_variables!(m::Optimizer, hx_list::HxExpression, n::Int)
             parent_list = hx_list,
         )
         info.lb = 0.0
-        info.ub = Float64(n - 1)
+        info.ub = Float64(n)
         idx = MOI.Utilities.CleverDicts.add_item(m.variable_info, info)
         _info(m, idx).index = idx
         push!(indices, idx)
@@ -24,7 +32,7 @@ function _add_list_variables!(m::Optimizer, hx_list::HxExpression, n::Int)
     return indices
 end
 
-# ── MathOptVRP.List ────────────────────────────────────────────────────
+# ── MathOptVRP.List ─────────────────────────────────────────────────
 
 function MOI.supports_add_constrained_variables(
     ::Optimizer,
@@ -47,7 +55,7 @@ function MOI.add_constrained_variables(m::Optimizer, set::MathOptVRP.List)
     return indices, cindex
 end
 
-# ── MathOptVRP.Partition ───────────────────────────────────────────────
+# ── MathOptVRP.Partition ────────────────────────────────────────────
 
 function MOI.supports_add_constrained_variables(
     ::Optimizer,
@@ -73,7 +81,10 @@ function MOI.add_constrained_variables(m::Optimizer, set::MathOptVRP.Partition)
     return indices, cindex
 end
 
-# ── MathOptVRP.PartitionPD ─────────────────────────────────────────────
+# ── MathOptVRP.PartitionPD ──────────────────────────────────────────
+
+_pd_n_total(s::MathOptVRP.PartitionPD) =
+    s.num_services + 2 * s.num_pickup_deliveries
 
 function MOI.supports_add_constrained_variables(
     ::Optimizer,
@@ -84,7 +95,7 @@ end
 
 function MOI.add_constrained_variables(m::Optimizer, set::MathOptVRP.PartitionPD)
     md = m.model
-    n_total = MathOptVRP._pd_n_total(set)
+    n_total = _pd_n_total(set)
     lists = HxExpression[list!(md, n_total) for _ = 1:(set.num_trucks)]
     _add_hexaly_constraint!(m, partition(md, lists))
     for k = 0:(set.num_pickup_deliveries-1)
@@ -122,6 +133,18 @@ function MOI.supports_constraint(
     return true
 end
 
+# These sets constrain node variables that a `Partition` / `PartitionPD`
+# already created; they cannot create any. Without this, MOI's default
+# infers `supports_add_constrained_variables` from the `VectorOfVariables`
+# constraint above and `copy_to` builds the variables from this set instead
+# of from the partition, leaving them without a backing Hexaly list.
+function MOI.supports_add_constrained_variables(
+    ::Optimizer,
+    ::Type{<:MathOptVRP.TimeWindows},
+)
+    return false
+end
+
 function MOI.add_constraint(
     m::Optimizer,
     f::Union{MOI.VectorOfVariables,MOI.VectorAffineFunction},
@@ -132,6 +155,8 @@ function MOI.add_constraint(
         "MathOptVRP.TimeWindows expected `length([t; depot_start; nodes; depot_end]) ",
         "== $(MOI.dimension(s))`; got $(length(items)).",
     )
+    # Item 1 is the user's `t` variable, items 2..end are node values.
+    _shift_to_zero_based!(items, 2)
     items[1] isa MOI.VariableIndex || error(
         "MathOptVRP.TimeWindows: first item must be the total-time `t` variable.",
     )
@@ -229,6 +254,18 @@ function MOI.supports_constraint(
     return true
 end
 
+# These sets constrain node variables that a `Partition` / `PartitionPD`
+# already created; they cannot create any. Without this, MOI's default
+# infers `supports_add_constrained_variables` from the `VectorOfVariables`
+# constraint above and `copy_to` builds the variables from this set instead
+# of from the partition, leaving them without a backing Hexaly list.
+function MOI.supports_add_constrained_variables(
+    ::Optimizer,
+    ::Type{<:MathOptVRP.Capacity},
+)
+    return false
+end
+
 function MOI.add_constraint(
     m::Optimizer,
     f::Union{MOI.VectorOfVariables,MOI.VectorAffineFunction},
@@ -239,6 +276,7 @@ function MOI.add_constraint(
         "MathOptVRP.Capacity expected `length(nodes) == $(MOI.dimension(s))`; ",
         "got $(length(items)).",
     )
+    _shift_to_zero_based!(items)
     all(it -> it isa MOI.VariableIndex, items) || error(
         "MathOptVRP.Capacity: every item must be a `MOI.VariableIndex` backed by ",
         "a Hexaly list.",
@@ -295,6 +333,18 @@ function MOI.supports_constraint(
     return true
 end
 
+# These sets constrain node variables that a `Partition` / `PartitionPD`
+# already created; they cannot create any. Without this, MOI's default
+# infers `supports_add_constrained_variables` from the `VectorOfVariables`
+# constraint above and `copy_to` builds the variables from this set instead
+# of from the partition, leaving them without a backing Hexaly list.
+function MOI.supports_add_constrained_variables(
+    ::Optimizer,
+    ::Type{<:MathOptVRP.CapacitatedTimeWindows},
+)
+    return false
+end
+
 function MOI.add_constraint(
     m::Optimizer,
     f::Union{MOI.VectorOfVariables,MOI.VectorAffineFunction},
@@ -306,6 +356,8 @@ function MOI.add_constraint(
         "`length([t; depot_start; nodes; depot_end]) == $(MOI.dimension(s))`; ",
         "got $(length(items)).",
     )
+    # Item 1 is the user's `t` variable, items 2..end are node values.
+    _shift_to_zero_based!(items, 2)
     items[1] isa MOI.VariableIndex || error(
         "MathOptVRP.CapacitatedTimeWindows: first item must be the total-time ",
         "`t` variable.",
