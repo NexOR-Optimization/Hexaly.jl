@@ -117,11 +117,10 @@ function _vector_affine_to_items(f::MOI.VectorAffineFunction)
     return items
 end
 
-# `MathOptVRP` node values are 1-based, like the rest of MOI, while Hexaly's
-# `list` decision variables take values in `0:n-1` and index arrays 0-based.
-# The `ZeroBasedBridge` of `bridges.jl` substituted every node variable by
-# `y + 1`, so taking that one back out recovers the raw Hexaly variable and,
-# for a constant node such as a depot, the 0-based index.
+# `MathOptVRP` node values are 1-based, while Hexaly lists and arrays are
+# 0-based. List variables retain their identity here because the specialized
+# lowering paths below access their raw parent list; constants are shifted for
+# Hexaly array indexing.
 function _shift_to_zero_based!(items, from::Int = 1)
     for k = from:length(items)
         items[k] = _zero_based(items[k])
@@ -135,13 +134,7 @@ function _zero_based(f::MOI.ScalarAffineFunction)
     return _simplify_item(MOI.ScalarAffineFunction(f.terms, f.constant - 1))
 end
 
-function _zero_based(vi::MOI.VariableIndex)
-    return error(
-        "Hexaly: the node variable `$vi` was not offset by `Hexaly.ZeroBasedBridge`. ",
-        "Use `MOI.instantiate(Hexaly.Optimizer; with_bridge_type = Float64)` or ",
-        "`JuMP.Model(Hexaly.Optimizer)` so that the bridge is added.",
-    )
-end
+_zero_based(vi::MOI.VariableIndex) = vi
 
 _simplify_item(x) = x
 function _simplify_item(f::MOI.ScalarAffineFunction)
