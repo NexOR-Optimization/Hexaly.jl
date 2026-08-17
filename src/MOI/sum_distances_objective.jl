@@ -118,7 +118,7 @@ function _vector_affine_to_items(f::MOI.VectorAffineFunction)
 end
 
 # `MathOptVRP` node values are 1-based, while Hexaly lists and arrays are
-# 0-based. List variables retain their identity here because the specialized
+# 0-based. Permutation variables retain their identity here because the specialized
 # lowering paths below access their raw parent list; constants are shifted for
 # Hexaly array indexing.
 function _shift_to_zero_based!(items, from::Int = 1)
