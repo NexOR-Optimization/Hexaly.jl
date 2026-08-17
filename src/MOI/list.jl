@@ -32,22 +32,22 @@ function _add_list_variables!(m::Optimizer, hx_list::HxExpression, n::Int)
     return indices
 end
 
-# ── MathOptVRP.List ─────────────────────────────────────────────────
+# ── MathOptVRP.Permutation ──────────────────────────────────────────
 
 function MOI.supports_add_constrained_variables(
     ::Optimizer,
-    ::Type{MathOptVRP.List},
+    ::Type{MathOptVRP.Permutation},
 )
     return true
 end
 
-function MOI.add_constrained_variables(m::Optimizer, set::MathOptVRP.List)
+function MOI.add_constrained_variables(m::Optimizer, set::MathOptVRP.Permutation)
     n = set.dimension
     hx_list = list!(m.model, n)
     # Pin the list's count so the solver can't pick a shorter list.
     _add_hexaly_constraint!(m, eq(m.model, count_(m.model, hx_list), n))
     indices = _add_list_variables!(m, hx_list, n)
-    cindex = MOI.ConstraintIndex{MOI.VectorOfVariables,MathOptVRP.List}(
+    cindex = MOI.ConstraintIndex{MOI.VectorOfVariables,MathOptVRP.Permutation}(
         length(m.constraint_info) + 1,
     )
     m.constraint_info[cindex] =
