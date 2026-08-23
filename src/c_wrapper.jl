@@ -394,6 +394,27 @@ function collection_value(s::HxSolution, e::HxExpression)
 end
 collection_value(e::HxExpression) = collection_value(solution(e.opt), e)
 
+function set_int_value!(s::HxSolution, e::HxExpression, value::Integer)
+    hx_solution_set_int_value(s.ptr, e.id, Clonglong(value))
+    return e
+end
+
+function set_collection_value!(s::HxSolution, e::HxExpression,
+        values::AbstractVector{<:Integer})
+    ccall((:hx_solution_collection_clear, libhexaly), Cvoid,
+        (hxsolution, Cint), s.ptr, e.id)
+    data = Clonglong.(values)
+    GC.@preserve data ccall((:hx_solution_collection_add_all, libhexaly), Cvoid,
+        (hxsolution, Cint, Ptr{Clonglong}, Cint),
+        s.ptr, e.id, data, Cint(length(data)))
+    return e
+end
+
+set_int_value!(e::HxExpression, value::Integer) =
+    set_int_value!(solution(e.opt), e, value)
+set_collection_value!(e::HxExpression, values::AbstractVector{<:Integer}) =
+    set_collection_value!(solution(e.opt), e, values)
+
 # ── Parameters (HxParam) ──────────────────────────────────────────────
 #
 # Hexaly parameters use a typed attribute API:

@@ -244,6 +244,124 @@ function MOI.add_constraint(
     return cindex
 end
 
+# ── MathOptVRP route-side sequence constraints ──────────────────────────────
+
+function _mathoptvrp_parent_list(
+    m::Optimizer,
+    f::Union{MOI.VectorOfVariables,MOI.VectorAffineFunction},
+    dimension::Int,
+    set_name::AbstractString,
+)
+    items = _normalize_sum_distances_items(f)
+    length(items) == dimension || error(
+        "$set_name expected $dimension route-node variables; got $(length(items)).",
+    )
+    _shift_to_zero_based!(items)
+    all(it -> it isa MOI.VariableIndex, items) || error(
+        "$set_name: every item must be a `MOI.VariableIndex` backed by a Hexaly list.",
+    )
+    seq = _info(m, items[1]).parent_list
+    seq !== nothing || error("$set_name: variables have no parent Hexaly list.")
+    all(_info(m, vi).parent_list === seq for vi in items) || error(
+        "$set_name: all node variables must belong to the same Hexaly list.",
+    )
+    return seq
+end
+
+for SetType in (
+    MathOptVRP.RouteCompatibility,
+    MathOptVRP.RouteOrder,
+    MathOptVRP.RouteExtremities,
+)
+    @eval begin
+        function MOI.supports_constraint(
+            ::Optimizer,
+            ::Type{<:Union{MOI.VectorOfVariables,MOI.VectorAffineFunction}},
+            ::Type{<:$SetType},
+        )
+            return true
+        end
+
+        function MOI.supports_add_constrained_variables(
+            ::Optimizer,
+            ::Type{<:$SetType},
+        )
+            return false
+        end
+    end
+end
+
+function MOI.add_constraint(
+    m::Optimizer,
+    f::Union{MOI.VectorOfVariables,MOI.VectorAffineFunction},
+    s::MathOptVRP.RouteCompatibility,
+)
+    seq = _mathoptvrp_parent_list(
+        m, f, MOI.dimension(s), "MathOptVRP.RouteCompatibility",
+    )
+    for node in findall(!, s.allowed)
+        _add_hexaly_constraint!(m, eq(m.model, contains_(m.model, seq, node - 1), 0))
+    end
+    cindex = MOI.ConstraintIndex{typeof(f),typeof(s)}(
+        length(m.constraint_info) + 1,
+    )
+    m.constraint_info[cindex] = ConstraintInfo(cindex, nothing, f, s)
+    return cindex
+end
+
+function MOI.add_constraint(
+    m::Optimizer,
+    f::Union{MOI.VectorOfVariables,MOI.VectorAffineFunction},
+    s::MathOptVRP.RouteOrder,
+)
+    seq = _mathoptvrp_parent_list(
+        m, f, MOI.dimension(s), "MathOptVRP.RouteOrder",
+    )
+    md = m.model
+    for p in findall(s.before), q in findall(s.after)
+        both = and_(md, contains_(md, seq, p - 1), contains_(md, seq, q - 1))
+        _add_hexaly_constraint!(m, or_(md, not_(md, both),
+            lt(md, index_of(md, seq, p - 1), index_of(md, seq, q - 1))))
+    end
+    cindex = MOI.ConstraintIndex{typeof(f),typeof(s)}(
+        length(m.constraint_info) + 1,
+    )
+    m.constraint_info[cindex] = ConstraintInfo(cindex, nothing, f, s)
+    return cindex
+end
+
+function MOI.add_constraint(
+    m::Optimizer,
+    f::Union{MOI.VectorOfVariables,MOI.VectorAffineFunction},
+    s::MathOptVRP.RouteExtremities,
+)
+    seq = _mathoptvrp_parent_list(
+        m, f, MOI.dimension(s), "MathOptVRP.RouteExtremities",
+    )
+    md = m.model
+    others = findall(!, s.members)
+    for p in findall(s.members)
+        isempty(others) && continue
+        pairwise_before = [or_(md, not_(md, contains_(md, seq, q - 1)),
+            lt(md, index_of(md, seq, p - 1), index_of(md, seq, q - 1)))
+            for q in others]
+        pairwise_after = [or_(md, not_(md, contains_(md, seq, q - 1)),
+            lt(md, index_of(md, seq, q - 1), index_of(md, seq, p - 1)))
+            for q in others]
+        before = length(pairwise_before) == 1 ? pairwise_before[1] :
+            and_(md, pairwise_before...)
+        after = length(pairwise_after) == 1 ? pairwise_after[1] :
+            and_(md, pairwise_after...)
+        _add_hexaly_constraint!(m, or_(md,
+            not_(md, contains_(md, seq, p - 1)), before, after))
+    end
+    cindex = MOI.ConstraintIndex{typeof(f),typeof(s)}(
+        length(m.constraint_info) + 1,
+    )
+    m.constraint_info[cindex] = ConstraintInfo(cindex, nothing, f, s)
+    return cindex
+end
+
 # ── MathOptVRP.Capacity ────────────────────────────────────────────────
 
 function MOI.supports_constraint(
