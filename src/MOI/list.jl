@@ -183,7 +183,7 @@ function MOI.add_constraint(
     )
 
     md = m.model
-    t_var = _info(m, t_vi).variable
+    t_var = _expression!(m, t_vi)
     seq = first_pl
     c = count_(md, seq)
     service = round(Int, s.service)
@@ -362,6 +362,109 @@ function MOI.add_constraint(
     return cindex
 end
 
+# ── MathOptVRP.RouteSchedule ────────────────────────────────────────────────
+
+function MOI.supports_constraint(
+    ::Optimizer,
+    ::Type{<:Union{MOI.VectorOfVariables,MOI.VectorAffineFunction}},
+    ::Type{<:MathOptVRP.RouteSchedule},
+)
+    return true
+end
+
+function MOI.supports_add_constrained_variables(
+    ::Optimizer,
+    ::Type{<:MathOptVRP.RouteSchedule},
+)
+    return false
+end
+
+function MOI.add_constraint(
+    m::Optimizer,
+    f::Union{MOI.VectorOfVariables,MOI.VectorAffineFunction},
+    s::MathOptVRP.RouteSchedule,
+)
+    items = _normalize_sum_distances_items(f)
+    n = length(s.service)
+    length(items) == MOI.dimension(s) || error(
+        "MathOptVRP.RouteSchedule expected $(MOI.dimension(s)) variables; " *
+        "got $(length(items)).",
+    )
+    all(it -> it isa MOI.VariableIndex, items) || error(
+        "MathOptVRP.RouteSchedule expects only `MOI.VariableIndex` values.",
+    )
+    route_start = _expression!(m, items[1])
+    route_end = _expression!(m, items[2])
+    visit_vars = items[3:(n+2)]
+    node_vars = items[(n+3):end]
+    seq = _info(m, node_vars[1]).parent_list
+    seq !== nothing || error(
+        "MathOptVRP.RouteSchedule: route-node variables have no parent Hexaly list.",
+    )
+    all(_info(m, vi).parent_list === seq for vi in node_vars) || error(
+        "MathOptVRP.RouteSchedule: route-node variables must belong to one Hexaly list.",
+    )
+
+    md = m.model
+    c = count_(md, seq)
+    depot = s.depot - 1
+    travel = array(md, [array(md, round.(Int, s.travel[i, :]))
+        for i in axes(s.travel, 1)])
+    earliest = array(md, round.(Int, s.earliest))
+    latest = array(md, round.(Int, s.latest))
+    service = array(md, round.(Int, s.service))
+    visit_start = array(md, [_expression!(m, vi) for vi in visit_vars])
+    departure_service = round(Int, s.departure_service)
+
+    # A start-time variable is active exactly when its visit belongs to this
+    # route. Keeping absent values at zero makes cross-route expressions easy.
+    for node = 0:(n-1)
+        _add_hexaly_constraint!(m, or_(md,
+            contains_(md, seq, node),
+            eq(md, at(md, visit_start, node), 0),
+        ))
+    end
+
+    _add_hexaly_constraint!(m, and_(md,
+        range_(md, 0, c),
+        lambda_function(md, i -> begin
+            node = at(md, seq, i)
+            ready = iif(md,
+                eq(md, i, 0),
+                sum(md, route_start, departure_service,
+                    at(md, travel, depot, node)),
+                sum(md,
+                    at(md, visit_start, at(md, seq, sub(md, i, 1))),
+                    at(md, service, at(md, seq, sub(md, i, 1))),
+                    at(md, travel, at(md, seq, sub(md, i, 1)), node),
+                ),
+            )
+            and_(md,
+                geq(md, at(md, visit_start, node),
+                    max(md, at(md, earliest, node), ready)),
+                leq(md, at(md, visit_start, node), at(md, latest, node)),
+            )
+        end; nargs = 1),
+    ))
+
+    last_return = iif(md,
+        gt(md, c, 0),
+        sum(md,
+            at(md, visit_start, at(md, seq, sub(md, c, 1))),
+            at(md, service, at(md, seq, sub(md, c, 1))),
+            at(md, travel, at(md, seq, sub(md, c, 1)), depot),
+        ),
+        route_start,
+    )
+    _add_hexaly_constraint!(m, geq(md, route_end, last_return))
+
+    cindex = MOI.ConstraintIndex{typeof(f),typeof(s)}(
+        length(m.constraint_info) + 1,
+    )
+    m.constraint_info[cindex] = ConstraintInfo(cindex, nothing, f, s)
+    return cindex
+end
+
 # ── MathOptVRP.Capacity ────────────────────────────────────────────────
 
 function MOI.supports_constraint(
@@ -506,7 +609,7 @@ function MOI.add_constraint(
     )
 
     md = m.model
-    t_var = _info(m, t_vi).variable
+    t_var = _expression!(m, t_vi)
     seq = first_pl
     c = count_(md, seq)
     capacity = round(Int, s.capacity)

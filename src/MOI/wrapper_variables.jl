@@ -5,10 +5,15 @@ function _info(m::Optimizer, key::MOI.VariableIndex)
     throw(MOI.InvalidIndex(key))
 end
 
-function _make_var(m::Optimizer, variable::HxExpression; is_integer::Bool = true)
+function _make_var(
+    m::Optimizer,
+    variable::Union{Nothing,HxExpression} = nothing;
+    is_integer::Bool = false,
+    used::Bool = variable !== nothing,
+)
     index = MOI.Utilities.CleverDicts.add_item(
         m.variable_info,
-        VariableInfo(MOI.VariableIndex(0), variable; is_integer = is_integer),
+        VariableInfo(MOI.VariableIndex(0), variable; is_integer, used),
     )
     _info(m, index).index = index
     return index
@@ -16,13 +21,53 @@ end
 
 function _make_var(
     m::Optimizer,
-    variable::HxExpression,
+    variable::Union{Nothing,HxExpression},
     set::MOI.AbstractScalarSet;
     is_integer::Bool = true,
 )
     index = _make_var(m, variable; is_integer = is_integer)
     S = typeof(set)
     return index, MOI.ConstraintIndex{MOI.VariableIndex,S}(index.value)
+end
+
+function _materialize!(m::Optimizer, info::VariableInfo)
+    info.variable !== nothing && return info.variable
+    if info.is_binary
+        info.variable = _new_bool(m)
+    elseif info.is_integer
+        lb = info.lb === nothing ? _DEFAULT_INT_LB : ceil(Int, info.lb)
+        ub = info.ub === nothing ? _DEFAULT_INT_UB : floor(Int, info.ub)
+        info.variable = _new_int(m, lb, ub)
+    else
+        lb = info.lb === nothing ? _DEFAULT_FLOAT_LB : info.lb
+        ub = info.ub === nothing ? _DEFAULT_FLOAT_UB : info.ub
+        info.variable = _new_float(m, lb, ub)
+    end
+    !isempty(info.name) && set_name!(info.variable, info.name)
+    return info.variable
+end
+
+function _expression!(m::Optimizer, index::MOI.VariableIndex)
+    info = _info(m, index)
+    variable = _materialize!(m, info)
+    info.used = true
+    return variable
+end
+
+function _define_expression!(
+    m::Optimizer,
+    index::MOI.VariableIndex,
+    expression::HxExpression,
+)
+    info = _info(m, index)
+    info.used && error(
+        "Cannot define variable $index: it has already been used or materialized.",
+    )
+    info.variable === nothing || error("Variable $index is already defined.")
+    info.variable = expression
+    info.is_defined = true
+    !isempty(info.name) && set_name!(expression, info.name)
+    return
 end
 
 _new_int(m::Optimizer, lb::Int, ub::Int) = int!(m.model, lb, ub)
@@ -51,20 +96,17 @@ function MOI.supports_add_constrained_variable(
 end
 
 function MOI.add_variable(m::Optimizer)
-    v = _new_float(m, _DEFAULT_FLOAT_LB, _DEFAULT_FLOAT_UB)
-    return _make_var(m, v; is_integer = false)
+    return _make_var(m)
 end
 
 function MOI.add_constrained_variable(m::Optimizer, set::MOI.Integer)
-    v = _new_int(m, _DEFAULT_INT_LB, _DEFAULT_INT_UB)
-    vindex, cindex = _make_var(m, v, set; is_integer = true)
+    vindex, cindex = _make_var(m, nothing, set; is_integer = true)
     _info(m, vindex).is_integer = true
     return vindex, cindex
 end
 
 function MOI.add_constrained_variable(m::Optimizer, set::MOI.ZeroOne)
-    v = _new_bool(m)
-    vindex, cindex = _make_var(m, v, set; is_integer = true)
+    vindex, cindex = _make_var(m, nothing, set; is_integer = true)
     info = _info(m, vindex)
     info.is_binary = true
     info.is_integer = true
@@ -75,14 +117,8 @@ end
 
 function MOI.add_constrained_variable(m::Optimizer, set::MOI.EqualTo{T}) where {T<:Real}
     val = set.value
-    if T <: Integer
-        v = _new_int(m, Int(val), Int(val))
-        is_int = true
-    else
-        v = _new_float(m, val, val)
-        is_int = false
-    end
-    vindex, cindex = _make_var(m, v, set; is_integer = is_int)
+    is_int = T <: Integer
+    vindex, cindex = _make_var(m, nothing, set; is_integer = is_int)
     info = _info(m, vindex)
     info.lb = Float64(val)
     info.ub = Float64(val)
@@ -95,13 +131,11 @@ function MOI.add_constrained_variable(
 ) where {T<:Real}
     if T <: Integer
         lb = ceil(Int, set.lower)
-        v = _new_int(m, lb, _DEFAULT_INT_UB)
         is_int = true
     else
-        v = _new_float(m, set.lower, _DEFAULT_FLOAT_UB)
         is_int = false
     end
-    vindex, cindex = _make_var(m, v, set; is_integer = is_int)
+    vindex, cindex = _make_var(m, nothing, set; is_integer = is_int)
     _info(m, vindex).lb = Float64(set.lower)
     return vindex, cindex
 end
@@ -112,13 +146,11 @@ function MOI.add_constrained_variable(
 ) where {T<:Real}
     if T <: Integer
         ub = floor(Int, set.upper)
-        v = _new_int(m, _DEFAULT_INT_LB, ub)
         is_int = true
     else
-        v = _new_float(m, _DEFAULT_FLOAT_LB, set.upper)
         is_int = false
     end
-    vindex, cindex = _make_var(m, v, set; is_integer = is_int)
+    vindex, cindex = _make_var(m, nothing, set; is_integer = is_int)
     _info(m, vindex).ub = Float64(set.upper)
     return vindex, cindex
 end
@@ -130,13 +162,11 @@ function MOI.add_constrained_variable(
     if T <: Integer
         lb = ceil(Int, set.lower)
         ub = floor(Int, set.upper)
-        v = _new_int(m, lb, ub)
         is_int = true
     else
-        v = _new_float(m, set.lower, set.upper)
         is_int = false
     end
-    vindex, cindex = _make_var(m, v, set; is_integer = is_int)
+    vindex, cindex = _make_var(m, nothing, set; is_integer = is_int)
     info = _info(m, vindex)
     info.lb = Float64(set.lower)
     info.ub = Float64(set.upper)
@@ -156,7 +186,7 @@ MOI.get(m::Optimizer, ::MOI.VariableName, v::MOI.VariableIndex) = _info(m, v).na
 function MOI.set(m::Optimizer, ::MOI.VariableName, v::MOI.VariableIndex, name::String)
     info = _info(m, v)
     info.name = name
-    if !isempty(name)
+    if !isempty(name) && info.variable !== nothing
         try
             set_name!(info.variable, name)
         catch
