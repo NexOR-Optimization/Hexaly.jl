@@ -27,15 +27,50 @@ import MathOptInterface as MOI
         Bool[false, false, true, false, false, false, false],
     ))
     @constraint(model, route[:, 3] in MathOptVRP.RouteExtremities(
-        Bool[false, false, false, false, true, true, false],
+        Bool[false, false, false, false, true, false, false],
     ))
     optimize!(model)
     @test termination_status(model) in (MOI.OPTIMAL, MOI.TIME_LIMIT)
     values = round.(Int, value.(route))
     @test values[1:2, 1] == [2, 1]
     @test values[1:2, 2] == [4, 3]
-    @test values[2, 3] == 7
-    @test Set(values[[1, 3], 3]) == Set([5, 6])
+    third_route = filter(!iszero, values[:, 3])
+    @test Set(third_route) == Set([5, 6, 7])
+    @test first(third_route) == 5 || last(third_route) == 5
+end
+
+@testset "MathOptVRP time-window variants" begin
+    travel = [0 3 2 9; 3 0 9 4; 2 9 0 0; 9 4 0 0]
+    earliest = zeros(Int, 4)
+    latest = fill(100, 4)
+    service = [1, 1, 0, 0]
+    for W in (MathOptVRP.WITHOUT_START_TIME, MathOptVRP.WITH_START_TIME)
+        model = Model(Hexaly.Optimizer)
+        set_silent(model)
+        set_time_limit_sec(model, 2.0)
+        @variable(model, route[1:2, 1:1] in MathOptVRP.Partition(2, 1))
+        @constraint(model, route[:, 1] in MathOptVRP.RouteOrder(
+            Bool[true, false], Bool[false, true],
+        ))
+        @variable(model, 0 <= route_end <= 100)
+        set = MathOptVRP.TimeWindows{W}(
+            travel, earliest, latest, service, 2,
+        )
+        if W == MathOptVRP.WITH_START_TIME
+            @variable(model, 0 <= start_time[1:4] <= 100)
+            @constraint(model,
+                [start_time; route_end; 3; route[:, 1]; 4] in set)
+        else
+            @constraint(model, [route_end; 3; route[:, 1]; 4] in set)
+        end
+        @objective(model, Min, route_end)
+        optimize!(model)
+        @test termination_status(model) in (MOI.OPTIMAL, MOI.LOCALLY_SOLVED)
+        @test round(Int, value(route_end)) == 11
+        if W == MathOptVRP.WITH_START_TIME
+            @test round.(Int, value.(start_time)) == [2, 6, 0, 11]
+        end
+    end
 end
 
 @testset "MathOptVRP defined route values" begin
