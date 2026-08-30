@@ -61,10 +61,9 @@ function MOI.add_constraint(
     return cindex
 end
 
-# AllDifferent — Hexaly's `distinct` is an operator over a *list* decision
-# variable, not a boolean constraint on individual variables. We encode
-# AllDifferent as a conjunction of pairwise `neq` expressions, which are
-# boolean and can be constrained directly.
+# AllDifferent — Hexaly 15's `distinct(array)` returns a set, not a Boolean
+# all-different predicate. Build the Boolean predicate from pairwise `neq`
+# expressions so it can also be reified directly.
 
 # These sets constrain existing scalar variables; they are not variable
 # constructors. In particular, letting MOI choose `AllDifferent` as a variable
@@ -98,6 +97,46 @@ function _build_constraint(m::Optimizer, f::MOI.VectorOfVariables, ::MOI.AllDiff
         push!(pairs, neq(md, vars[i], vars[j]))
     end
     return length(pairs) == 1 ? pairs[1] : and_(md, pairs...)
+end
+
+# Reified(AllDifferent): the first row is the Boolean truth value and the
+# remaining rows are the values whose pairwise distinctness it represents.
+# Implement the equivalence natively instead of using MOI's
+# AllDifferent -> CountDistinct -> MILP bridge chain.
+function MOI.supports_constraint(
+    ::Optimizer,
+    ::Type{MOI.VectorOfVariables},
+    ::Type{MOI.Reified{MOI.AllDifferent}},
+)
+    return true
+end
+
+function MOI.supports_add_constrained_variables(
+    ::Optimizer,
+    ::Type{MOI.Reified{MOI.AllDifferent}},
+)
+    return false
+end
+
+function MOI.add_constraint(
+    m::Optimizer,
+    f::MOI.VectorOfVariables,
+    s::MOI.Reified{MOI.AllDifferent},
+)
+    length(f.variables) == MOI.dimension(s) || error(
+        "Hexaly Reified(AllDifferent) expected $(MOI.dimension(s)) variables; " *
+        "got $(length(f.variables)).",
+    )
+    truth = _expression!(m, first(f.variables))
+    values = MOI.VectorOfVariables(f.variables[2:end])
+    all_different = _build_constraint(m, values, s.set)
+    expr = eq(m.model, truth, all_different)
+    _add_hexaly_constraint!(m, expr)
+    index = MOI.ConstraintIndex{typeof(f),typeof(s)}(
+        length(m.constraint_info) + 1,
+    )
+    m.constraint_info[index] = ConstraintInfo(index, expr, f, s)
+    return index
 end
 
 # Circuit — encoded via a reachability formulation. See the original Python

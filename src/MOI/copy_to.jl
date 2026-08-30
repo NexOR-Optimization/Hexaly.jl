@@ -27,7 +27,8 @@ function MOI.copy_to(dest::Optimizer, src::MOI.ModelLike)
 
     MOI.Utilities.pass_attributes(dest, src, index_map, vis_src)
 
-    # Variable domains first, route-value definitions second, consumers last.
+    # Preserve default_copy_to's constrained-variable handling. Only reorder
+    # the constraints it did not use as variable constructors.
     sort!(constraints_not_added; by = cis -> _copy_priority(eltype(cis)))
     for cis in constraints_not_added
         MOI.Utilities._copy_constraints(dest, src, index_map, cis)
@@ -44,8 +45,8 @@ function MOI.copy_to(dest::Optimizer, src::MOI.ModelLike)
         )
     end
 
-    # Constraint attributes can only be copied after all constraint indices
-    # have entered the index map.
+    # Match default_copy_to: constraint attributes are copied only after every
+    # constructor and pending constraint has populated the index map.
     for (F, S) in all_types
         MOI.Utilities.pass_attributes(
             dest,
@@ -55,8 +56,8 @@ function MOI.copy_to(dest::Optimizer, src::MOI.ModelLike)
         )
     end
 
-    # Unlike default_copy_to, delay model attributes (particularly the
-    # objective) until expression-defining constraints have been processed.
+    # Delay model attributes (particularly the objective) until definitions
+    # have been processed.
     MOI.Utilities.pass_attributes(dest, src, index_map)
     MOI.Utilities.final_touch(dest, index_map)
     return index_map

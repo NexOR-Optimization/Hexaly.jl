@@ -34,6 +34,15 @@ function _materialize!(m::Optimizer, info::VariableInfo)
     info.variable !== nothing && return info.variable
     if info.is_binary
         info.variable = _new_bool(m)
+        # A Boolean constructor always has domain 0:1. Preserve tighter
+        # scalar domains collected before materialization (notably `z == 1`
+        # in reified constraints) by posting them explicitly.
+        if info.lb !== nothing && info.lb > 0
+            _add_hexaly_constraint!(m, geq(m.model, info.variable, info.lb))
+        end
+        if info.ub !== nothing && info.ub < 1
+            _add_hexaly_constraint!(m, leq(m.model, info.variable, info.ub))
+        end
     elseif info.is_integer
         lb = info.lb === nothing ? _DEFAULT_INT_LB : ceil(Int, info.lb)
         ub = info.ub === nothing ? _DEFAULT_INT_UB : floor(Int, info.ub)

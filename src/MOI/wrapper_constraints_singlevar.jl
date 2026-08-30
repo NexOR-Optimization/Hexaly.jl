@@ -87,7 +87,8 @@ function MOI.add_constraint(
     info = _info(m, f)
     if s isa MOI.ZeroOne
         info.is_binary = true
-        info.lb, info.ub = 0.0, 1.0
+        info.lb = info.lb === nothing ? 0.0 : max(info.lb, 0.0)
+        info.ub = info.ub === nothing ? 1.0 : min(info.ub, 1.0)
     end
     info.is_integer = true
     S = typeof(s)
@@ -102,8 +103,13 @@ function MOI.add_constraint(
     s::MOI.EqualTo{T},
 ) where {T<:Real}
     info = _info(m, f)
-    info.lb = Float64(s.value)
-    info.ub = Float64(s.value)
+    value = Float64(s.value)
+    (info.lb === nothing || info.lb <= value) &&
+        (info.ub === nothing || value <= info.ub) || error(
+            "Variable $f has incompatible equality and bound domains.",
+        )
+    info.lb = value
+    info.ub = value
     rhs = T <: Integer ? Int(s.value) : Float64(s.value)
     expr = info.variable === nothing ? nothing : eq(m.model, info.variable, rhs)
     expr !== nothing && _add_hexaly_constraint!(m, expr)
@@ -118,7 +124,8 @@ function MOI.add_constraint(
     s::MOI.LessThan{T},
 ) where {T<:Real}
     info = _info(m, f)
-    info.ub = Float64(s.upper)
+    upper = Float64(s.upper)
+    info.ub = info.ub === nothing ? upper : min(info.ub, upper)
     rhs = T <: Integer ? Int(s.upper) : Float64(s.upper)
     expr = info.variable === nothing ? nothing : leq(m.model, info.variable, rhs)
     expr !== nothing && _add_hexaly_constraint!(m, expr)
@@ -133,7 +140,8 @@ function MOI.add_constraint(
     s::MOI.GreaterThan{T},
 ) where {T<:Real}
     info = _info(m, f)
-    info.lb = Float64(s.lower)
+    lower = Float64(s.lower)
+    info.lb = info.lb === nothing ? lower : max(info.lb, lower)
     rhs = T <: Integer ? Int(s.lower) : Float64(s.lower)
     expr = info.variable === nothing ? nothing : geq(m.model, info.variable, rhs)
     expr !== nothing && _add_hexaly_constraint!(m, expr)
@@ -148,8 +156,9 @@ function MOI.add_constraint(
     s::MOI.Interval{T},
 ) where {T<:Real}
     info = _info(m, f)
-    info.lb = Float64(s.lower)
-    info.ub = Float64(s.upper)
+    lower, upper = Float64(s.lower), Float64(s.upper)
+    info.lb = info.lb === nothing ? lower : max(info.lb, lower)
+    info.ub = info.ub === nothing ? upper : min(info.ub, upper)
     lb = T <: Integer ? Int(s.lower) : Float64(s.lower)
     ub = T <: Integer ? Int(s.upper) : Float64(s.upper)
     if info.variable !== nothing

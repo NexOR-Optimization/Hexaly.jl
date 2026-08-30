@@ -287,7 +287,7 @@ partition(m::HxModel, lists::AbstractVector{HxExpression}) =
     _nary(m, HxOp.O_Partition, lists)
 partition(m::HxModel, lists::HxExpression...) = _nary(m, HxOp.O_Partition, lists)
 
-# distinct(seq) — built-in distinctness on a list.
+# distinct(array_or_list) — returns the set of distinct values.
 distinct(m::HxModel, seq::HxExpression) =
     HxExpression(m.opt, hx_create_expression_1(m.opt.ptr, HxOp.O_Distinct, seq.id))
 
