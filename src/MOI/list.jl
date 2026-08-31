@@ -121,122 +121,62 @@ function MOI.add_constrained_variables(m::Optimizer, set::MathOptVRP.PartitionPD
     return indices, cindex
 end
 
-# ── MathOptVRP.TimeWindows ─────────────────────────────────────────────
-# Layout: `[t; depot_start; nodes...; depot_end]`. Posts the per-customer
-# time-window constraint and the makespan linkage `t >= total_time`.
-
-function MOI.supports_constraint(
-    ::Optimizer,
-    ::Type{<:Union{MOI.VectorOfVariables,MOI.VectorAffineFunction}},
-    ::Type{<:MathOptVRP.TimeWindows},
+function _mathoptvrp_parent_list(
+    m::Optimizer,
+    f::Union{MOI.VectorOfVariables,MOI.VectorAffineFunction},
+    dimension::Int,
+    set_name::AbstractString,
 )
-    return true
+    items = _normalize_sum_distances_items(f)
+    length(items) == dimension || error(
+        "$set_name expected $dimension route-node variables; got $(length(items)).",
+    )
+    _shift_to_zero_based!(items)
+    all(it -> it isa MOI.VariableIndex, items) || error(
+        "$set_name: every item must be a `MOI.VariableIndex` backed by a Hexaly list.",
+    )
+    seq = _info(m, items[1]).parent_list
+    seq !== nothing || error("$set_name: variables have no parent Hexaly list.")
+    all(_info(m, vi).parent_list === seq for vi in items) || error(
+        "$set_name: all node variables must belong to the same Hexaly list.",
+    )
+    return seq
 end
 
-# These sets constrain node variables that a `Partition` / `PartitionPD`
-# already created; they cannot create any. Without this, MOI's default
-# infers `supports_add_constrained_variables` from the `VectorOfVariables`
-# constraint above and `copy_to` builds the variables from this set instead
-# of from the partition, leaving them without a backing Hexaly list.
-function MOI.supports_add_constrained_variables(
-    ::Optimizer,
-    ::Type{<:MathOptVRP.TimeWindows},
+for SetType in (
+    MathOptVRP.RouteCompatibility,
+    MathOptVRP.RouteOrder,
+    MathOptVRP.RouteExtremities,
 )
-    return false
+    @eval begin
+        function MOI.supports_constraint(
+            ::Optimizer,
+            ::Type{<:Union{MOI.VectorOfVariables,MOI.VectorAffineFunction}},
+            ::Type{<:$SetType},
+        )
+            return true
+        end
+
+        function MOI.supports_add_constrained_variables(
+            ::Optimizer,
+            ::Type{<:$SetType},
+        )
+            return false
+        end
+    end
 end
 
 function MOI.add_constraint(
     m::Optimizer,
     f::Union{MOI.VectorOfVariables,MOI.VectorAffineFunction},
-    s::MathOptVRP.TimeWindows,
+    s::MathOptVRP.RouteCompatibility,
 )
-    items = _normalize_sum_distances_items(f)
-    length(items) == MOI.dimension(s) || error(
-        "MathOptVRP.TimeWindows expected `length([t; depot_start; nodes; depot_end]) ",
-        "== $(MOI.dimension(s))`; got $(length(items)).",
+    seq = _mathoptvrp_parent_list(
+        m, f, MOI.dimension(s), "MathOptVRP.RouteCompatibility",
     )
-    # Item 1 is the user's `t` variable, items 2..end are node values.
-    _shift_to_zero_based!(items, 2)
-    items[1] isa MOI.VariableIndex || error(
-        "MathOptVRP.TimeWindows: first item must be the total-time `t` variable.",
-    )
-    items[2] isa Real || error(
-        "MathOptVRP.TimeWindows: second item must be the constant `depot_start` index.",
-    )
-    items[end] isa Real || error(
-        "MathOptVRP.TimeWindows: last item must be the constant `depot_end` index.",
-    )
-    t_vi = items[1]
-    depot_start = round(Int, items[2])
-    depot_end = round(Int, items[end])
-    var_items = @view items[3:(end-1)]
-    all(it -> it isa MOI.VariableIndex, var_items) || error(
-        "MathOptVRP.TimeWindows: items 3..end-1 must be node `MOI.VariableIndex` values ",
-        "backed by a Hexaly list.",
-    )
-    first_pl = _info(m, var_items[1]).parent_list
-    first_pl !== nothing || error(
-        "MathOptVRP.TimeWindows: node variables have no parent Hexaly list.",
-    )
-    all(_info(m, vi).parent_list === first_pl for vi in var_items) || error(
-        "MathOptVRP.TimeWindows: all node variables must belong to the same Hexaly list.",
-    )
-
-    md = m.model
-    t_var = _info(m, t_vi).variable
-    seq = first_pl
-    c = count_(md, seq)
-    service = round(Int, s.service)
-    n_rows = size(s.travel, 1)
-    dist_arr = array(md,
-        [array(md, round.(Int, s.travel[i, :])) for i = 1:n_rows])
-    earliest_arr = array(md, round.(Int, s.earliest))
-    latest_arr = array(md, round.(Int, s.latest))
-
-    end_time = array(md,
-        range_(md, 0, c),
-        lambda_function(md,
-            (i, prev) -> iif(md,
-                eq(md, i, 0),
-                sum(md,
-                    max(md,
-                        at(md, earliest_arr, at(md, seq, 0)),
-                        at(md, dist_arr, depot_start, at(md, seq, 0)),
-                    ),
-                    service,
-                ),
-                sum(md,
-                    max(md,
-                        at(md, earliest_arr, at(md, seq, i)),
-                        sum(md, prev, at(md, dist_arr, at(md, seq, sub(md, i, 1)), at(md, seq, i))),
-                    ),
-                    service,
-                ),
-            ); nargs = 2,
-        ),
-        0,
-    )
-
-    _add_hexaly_constraint!(m,
-        and_(md,
-            range_(md, 0, c),
-            lambda_function(md,
-                i -> leq(md,
-                    sub(md, at(md, end_time, i), service),
-                    at(md, latest_arr, at(md, seq, i)),
-                ); nargs = 1,
-            ),
-        ),
-    )
-
-    total_time = iif(md,
-        gt(md, c, 0),
-        sum(md, at(md, end_time, sub(md, c, 1)),
-            at(md, dist_arr, at(md, seq, sub(md, c, 1)), depot_end)),
-        0,
-    )
-    _add_hexaly_constraint!(m, geq(md, t_var, total_time))
-
+    for node in findall(!, s.allowed)
+        _add_hexaly_constraint!(m, eq(m.model, contains_(m.model, seq, node - 1), 0))
+    end
     cindex = MOI.ConstraintIndex{typeof(f),typeof(s)}(
         length(m.constraint_info) + 1,
     )
@@ -244,7 +184,59 @@ function MOI.add_constraint(
     return cindex
 end
 
-# ── MathOptVRP.Capacity ────────────────────────────────────────────────
+function MOI.add_constraint(
+    m::Optimizer,
+    f::Union{MOI.VectorOfVariables,MOI.VectorAffineFunction},
+    s::MathOptVRP.RouteOrder,
+)
+    seq = _mathoptvrp_parent_list(
+        m, f, MOI.dimension(s), "MathOptVRP.RouteOrder",
+    )
+    md = m.model
+    for p in findall(s.before), q in findall(s.after)
+        both = and_(md, contains_(md, seq, p - 1), contains_(md, seq, q - 1))
+        _add_hexaly_constraint!(m, or_(md, not_(md, both),
+            lt(md, index_of(md, seq, p - 1), index_of(md, seq, q - 1))))
+    end
+    cindex = MOI.ConstraintIndex{typeof(f),typeof(s)}(
+        length(m.constraint_info) + 1,
+    )
+    m.constraint_info[cindex] = ConstraintInfo(cindex, nothing, f, s)
+    return cindex
+end
+
+function MOI.add_constraint(
+    m::Optimizer,
+    f::Union{MOI.VectorOfVariables,MOI.VectorAffineFunction},
+    s::MathOptVRP.RouteExtremities,
+)
+    seq = _mathoptvrp_parent_list(
+        m, f, MOI.dimension(s), "MathOptVRP.RouteExtremities",
+    )
+    md = m.model
+    others = findall(!, s.members)
+    for p in findall(s.members)
+        isempty(others) && continue
+        pairwise_before = [or_(md, not_(md, contains_(md, seq, q - 1)),
+            lt(md, index_of(md, seq, p - 1), index_of(md, seq, q - 1)))
+            for q in others]
+        pairwise_after = [or_(md, not_(md, contains_(md, seq, q - 1)),
+            lt(md, index_of(md, seq, q - 1), index_of(md, seq, p - 1)))
+            for q in others]
+        before = length(pairwise_before) == 1 ? pairwise_before[1] :
+            and_(md, pairwise_before...)
+        after = length(pairwise_after) == 1 ? pairwise_after[1] :
+            and_(md, pairwise_after...)
+        _add_hexaly_constraint!(m, or_(md,
+            not_(md, contains_(md, seq, p - 1)), before, after))
+    end
+    cindex = MOI.ConstraintIndex{typeof(f),typeof(s)}(
+        length(m.constraint_info) + 1,
+    )
+    m.constraint_info[cindex] = ConstraintInfo(cindex, nothing, f, s)
+    return cindex
+end
+
 
 function MOI.supports_constraint(
     ::Optimizer,
@@ -388,7 +380,7 @@ function MOI.add_constraint(
     )
 
     md = m.model
-    t_var = _info(m, t_vi).variable
+    t_var = _expression!(m, t_vi)
     seq = first_pl
     c = count_(md, seq)
     capacity = round(Int, s.capacity)

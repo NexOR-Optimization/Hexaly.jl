@@ -87,7 +87,8 @@ function MOI.add_constraint(
     info = _info(m, f)
     if s isa MOI.ZeroOne
         info.is_binary = true
-        info.lb, info.ub = 0.0, 1.0
+        info.lb = info.lb === nothing ? 0.0 : max(info.lb, 0.0)
+        info.ub = info.ub === nothing ? 1.0 : min(info.ub, 1.0)
     end
     info.is_integer = true
     S = typeof(s)
@@ -101,13 +102,17 @@ function MOI.add_constraint(
     f::MOI.VariableIndex,
     s::MOI.EqualTo{T},
 ) where {T<:Real}
-    v = _info(m, f).variable
-    rhs = T <: Integer ? Int(s.value) : Float64(s.value)
-    expr = eq(m.model, v, rhs)
-    _add_hexaly_constraint!(m, expr)
     info = _info(m, f)
-    info.lb = Float64(s.value)
-    info.ub = Float64(s.value)
+    value = Float64(s.value)
+    (info.lb === nothing || info.lb <= value) &&
+        (info.ub === nothing || value <= info.ub) || error(
+            "Variable $f has incompatible equality and bound domains.",
+        )
+    info.lb = value
+    info.ub = value
+    rhs = T <: Integer ? Int(s.value) : Float64(s.value)
+    expr = info.variable === nothing ? nothing : eq(m.model, info.variable, rhs)
+    expr !== nothing && _add_hexaly_constraint!(m, expr)
     index = MOI.ConstraintIndex{MOI.VariableIndex,MOI.EqualTo{T}}(f.value)
     m.constraint_info[index] = ConstraintInfo(index, expr, f, s)
     return index
@@ -118,11 +123,12 @@ function MOI.add_constraint(
     f::MOI.VariableIndex,
     s::MOI.LessThan{T},
 ) where {T<:Real}
-    v = _info(m, f).variable
+    info = _info(m, f)
+    upper = Float64(s.upper)
+    info.ub = info.ub === nothing ? upper : min(info.ub, upper)
     rhs = T <: Integer ? Int(s.upper) : Float64(s.upper)
-    expr = leq(m.model, v, rhs)
-    _add_hexaly_constraint!(m, expr)
-    _info(m, f).ub = Float64(s.upper)
+    expr = info.variable === nothing ? nothing : leq(m.model, info.variable, rhs)
+    expr !== nothing && _add_hexaly_constraint!(m, expr)
     index = MOI.ConstraintIndex{MOI.VariableIndex,MOI.LessThan{T}}(f.value)
     m.constraint_info[index] = ConstraintInfo(index, expr, f, s)
     return index
@@ -133,11 +139,12 @@ function MOI.add_constraint(
     f::MOI.VariableIndex,
     s::MOI.GreaterThan{T},
 ) where {T<:Real}
-    v = _info(m, f).variable
+    info = _info(m, f)
+    lower = Float64(s.lower)
+    info.lb = info.lb === nothing ? lower : max(info.lb, lower)
     rhs = T <: Integer ? Int(s.lower) : Float64(s.lower)
-    expr = geq(m.model, v, rhs)
-    _add_hexaly_constraint!(m, expr)
-    _info(m, f).lb = Float64(s.lower)
+    expr = info.variable === nothing ? nothing : geq(m.model, info.variable, rhs)
+    expr !== nothing && _add_hexaly_constraint!(m, expr)
     index = MOI.ConstraintIndex{MOI.VariableIndex,MOI.GreaterThan{T}}(f.value)
     m.constraint_info[index] = ConstraintInfo(index, expr, f, s)
     return index
@@ -148,16 +155,16 @@ function MOI.add_constraint(
     f::MOI.VariableIndex,
     s::MOI.Interval{T},
 ) where {T<:Real}
-    v = _info(m, f).variable
+    info = _info(m, f)
+    lower, upper = Float64(s.lower), Float64(s.upper)
+    info.lb = info.lb === nothing ? lower : max(info.lb, lower)
+    info.ub = info.ub === nothing ? upper : min(info.ub, upper)
     lb = T <: Integer ? Int(s.lower) : Float64(s.lower)
     ub = T <: Integer ? Int(s.upper) : Float64(s.upper)
-    lb_expr = geq(m.model, v, lb)
-    ub_expr = leq(m.model, v, ub)
-    _add_hexaly_constraint!(m, lb_expr)
-    _add_hexaly_constraint!(m, ub_expr)
-    info = _info(m, f)
-    info.lb = Float64(s.lower)
-    info.ub = Float64(s.upper)
+    if info.variable !== nothing
+        _add_hexaly_constraint!(m, geq(m.model, info.variable, lb))
+        _add_hexaly_constraint!(m, leq(m.model, info.variable, ub))
+    end
     index = MOI.ConstraintIndex{MOI.VariableIndex,MOI.Interval{T}}(f.value)
     m.constraint_info[index] = ConstraintInfo(index, nothing, f, s)
     return index

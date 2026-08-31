@@ -74,6 +74,9 @@ include("MOI/wrapper_constraints_singlevar.jl")
 include("MOI/wrapper_constraints_linear.jl")
 include("MOI/wrapper_constraints_cp.jl")
 include("MOI/list.jl")
+include("MOI/time_windows.jl")
+include("MOI/defined_route_values.jl")
 include("MOI/sum_distances_objective.jl")
+include("MOI/copy_to.jl")
 
 end # module Hexaly

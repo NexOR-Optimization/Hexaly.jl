@@ -287,7 +287,7 @@ partition(m::HxModel, lists::AbstractVector{HxExpression}) =
     _nary(m, HxOp.O_Partition, lists)
 partition(m::HxModel, lists::HxExpression...) = _nary(m, HxOp.O_Partition, lists)
 
-# distinct(seq) — built-in distinctness on a list.
+# distinct(array_or_list) — returns the set of distinct values.
 distinct(m::HxModel, seq::HxExpression) =
     HxExpression(m.opt, hx_create_expression_1(m.opt.ptr, HxOp.O_Distinct, seq.id))
 
@@ -393,6 +393,27 @@ function collection_value(s::HxSolution, e::HxExpression)
     return Int[hx_collection_get(coll, Cint(i)) for i = 0:(n-1)]
 end
 collection_value(e::HxExpression) = collection_value(solution(e.opt), e)
+
+function set_int_value!(s::HxSolution, e::HxExpression, value::Integer)
+    hx_solution_set_int_value(s.ptr, e.id, Clonglong(value))
+    return e
+end
+
+function set_collection_value!(s::HxSolution, e::HxExpression,
+        values::AbstractVector{<:Integer})
+    ccall((:hx_solution_collection_clear, libhexaly), Cvoid,
+        (hxsolution, Cint), s.ptr, e.id)
+    data = Clonglong.(values)
+    GC.@preserve data ccall((:hx_solution_collection_add_all, libhexaly), Cvoid,
+        (hxsolution, Cint, Ptr{Clonglong}, Cint),
+        s.ptr, e.id, data, Cint(length(data)))
+    return e
+end
+
+set_int_value!(e::HxExpression, value::Integer) =
+    set_int_value!(solution(e.opt), e, value)
+set_collection_value!(e::HxExpression, values::AbstractVector{<:Integer}) =
+    set_collection_value!(solution(e.opt), e, values)
 
 # ── Parameters (HxParam) ──────────────────────────────────────────────
 #

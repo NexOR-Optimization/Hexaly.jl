@@ -11,7 +11,9 @@ const _DEFAULT_TIME_LIMIT = 10
 
 mutable struct VariableInfo
     index::MOI.VariableIndex
-    variable::HxExpression
+    variable::Union{Nothing,HxExpression}
+    used::Bool
+    is_defined::Bool
     # When the variable is an element of a Hexaly `list` decision variable
     # (e.g., via `MathOptVRP.Permutation` or `MathOptVRP.Partition`), `parent_list` is that
     # list expression. `_build_sum_distances_expression` uses it to access
@@ -26,13 +28,17 @@ end
 
 function VariableInfo(
     index::MOI.VariableIndex,
-    variable::HxExpression;
-    is_integer::Bool = true,
+    variable::Union{Nothing,HxExpression} = nothing;
+    is_integer::Bool = false,
     parent_list::Union{Nothing,HxExpression} = nothing,
+    used::Bool = variable !== nothing,
+    is_defined::Bool = false,
 )
     return VariableInfo(
         index,
         variable,
+        used,
+        is_defined,
         parent_list,
         "",
         nothing,
@@ -254,11 +260,7 @@ end
 
 # Incremental interface
 
-MOI.supports_incremental_interface(::Optimizer) = true
-
-function MOI.copy_to(dest::Optimizer, src::MOI.ModelLike)
-    return MOI.Utilities.default_copy_to(dest, src)
-end
+MOI.supports_incremental_interface(::Optimizer) = false
 
 # Apply Hexaly parameters (time limit, verbosity, raw options)
 
@@ -310,6 +312,13 @@ function MOI.optimize!(m::Optimizer)
         minimize!(m.model, create_constant(m.model, 0))
     end
 
+    # Materialize ordinary variables that were never referenced. Variables
+    # resolved by IsEmpty/SumGetIndex already hold their derived expressions
+    # and therefore do not create decisions here.
+    for (_, info) in m.variable_info
+        _materialize!(m, info)
+    end
+
     if !is_closed(m.model)
         close!(m.model)
     end
@@ -358,7 +367,7 @@ end
 function MOI.get(m::Optimizer, attr::MOI.VariablePrimal, vi::MOI.VariableIndex)
     MOI.check_result_index_bounds(m, attr)
     info = _info(m, vi)
-    return value(info.variable; is_integer = info.is_integer)
+    return value(_expression!(m, vi); is_integer = info.is_integer)
 end
 
 function MOI.get(m::Optimizer, attr::MOI.ObjectiveValue)
@@ -374,7 +383,7 @@ function _evaluate_objective(m::Optimizer)
     f = m.objective_function
     if f isa MOI.VariableIndex
         info = _info(m, f)
-        return value(info.variable; is_integer = info.is_integer)
+        return value(_expression!(m, f); is_integer = info.is_integer)
     elseif f isa MOI.ScalarNonlinearFunction
         # Hexaly's first objective expression carries the solved value.
         # Type (int vs double) is auto-detected from the expression.
@@ -385,7 +394,7 @@ function _evaluate_objective(m::Optimizer)
         val = f.constant
         for t in f.terms
             info = _info(m, t.variable)
-            v = value(info.variable; is_integer = info.is_integer)
+            v = value(_expression!(m, t.variable); is_integer = info.is_integer)
             val += t.coefficient * v
         end
         if T <: Integer

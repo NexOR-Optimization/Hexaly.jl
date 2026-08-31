@@ -149,7 +149,7 @@ end
 
 function _item_to_expr(m::Optimizer, it)
     if it isa MOI.VariableIndex
-        return _info(m, it).variable
+        return _expression!(m, it)
     elseif it isa Real
         return create_constant(m.model, round(Int, it))
     end

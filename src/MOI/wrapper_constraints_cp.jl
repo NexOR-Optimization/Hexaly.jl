@@ -1,9 +1,81 @@
 # CP constraints implemented as Hexaly expressions.
 
-# AllDifferent — Hexaly's `distinct` is an operator over a *list* decision
-# variable, not a boolean constraint on individual variables. We encode
-# AllDifferent as a conjunction of pairwise `neq` expressions, which are
-# boolean and can be constrained directly.
+# Indicator constraints. The activation variable may be a defined expression
+# such as MathOptVRP.IsEmpty instead of a native Hexaly decision.
+
+function MOI.supports_constraint(
+    ::Optimizer,
+    ::Type{<:Union{MOI.VectorOfVariables,MOI.VectorAffineFunction}},
+    ::Type{<:MOI.Indicator{A,S}},
+) where {
+    A,
+    T<:Real,
+    S<:Union{MOI.EqualTo{T},MOI.LessThan{T},MOI.GreaterThan{T}},
+}
+    return true
+end
+
+_indicator_on_one(::MOI.Indicator{MOI.ACTIVATE_ON_ONE}) = true
+_indicator_on_one(::MOI.Indicator{MOI.ACTIVATE_ON_ZERO}) = false
+
+function _indicator_item_expression(m::Optimizer, item)
+    if item isa MOI.VariableIndex
+        return _expression!(m, item)
+    elseif item isa MOI.ScalarAffineFunction
+        return _build_linear_expression(m, item)
+    elseif item isa Real
+        return create_constant(m.model, item)
+    end
+    error("Unsupported indicator item $(typeof(item)).")
+end
+
+function MOI.add_constraint(
+    m::Optimizer,
+    f::Union{MOI.VectorOfVariables,MOI.VectorAffineFunction},
+    s::MOI.Indicator{A,S},
+) where {
+    A,
+    T<:Real,
+    S<:Union{MOI.EqualTo{T},MOI.LessThan{T},MOI.GreaterThan{T}},
+}
+    items = _normalize_sum_distances_items(f)
+    length(items) == 2 || error("Hexaly indicator constraints need two rows.")
+    activation = _indicator_item_expression(m, items[1])
+    body = _indicator_item_expression(m, items[2])
+    inner = s.set
+    condition = if inner isa MOI.EqualTo
+        eq(m.model, body, inner.value)
+    elseif inner isa MOI.LessThan
+        leq(m.model, body, inner.upper)
+    else
+        geq(m.model, body, inner.lower)
+    end
+    implication = _indicator_on_one(s) ?
+        or_(m.model, not_(m.model, activation), condition) :
+        or_(m.model, activation, condition)
+    _add_hexaly_constraint!(m, implication)
+    cindex = MOI.ConstraintIndex{typeof(f),typeof(s)}(
+        length(m.constraint_info) + 1,
+    )
+    m.constraint_info[cindex] = ConstraintInfo(cindex, implication, f, s)
+    return cindex
+end
+
+# AllDifferent — Hexaly 15's `distinct(array)` returns a set, not a Boolean
+# all-different predicate. Build the Boolean predicate from pairwise `neq`
+# expressions so it can also be reified directly.
+
+# These sets constrain existing scalar variables; they are not variable
+# constructors. In particular, letting MOI choose `AllDifferent` as a variable
+# cone would materialize variables before their Integer/ZeroOne domains arrive.
+for SetType in (MOI.AllDifferent, MOI.Circuit, MOI.BinPacking, MOI.Table)
+    @eval function MOI.supports_add_constrained_variables(
+        ::Optimizer,
+        ::Type{<:$SetType},
+    )
+        return false
+    end
+end
 
 function MOI.supports_constraint(
     ::Optimizer,
@@ -25,6 +97,46 @@ function _build_constraint(m::Optimizer, f::MOI.VectorOfVariables, ::MOI.AllDiff
         push!(pairs, neq(md, vars[i], vars[j]))
     end
     return length(pairs) == 1 ? pairs[1] : and_(md, pairs...)
+end
+
+# Reified(AllDifferent): the first row is the Boolean truth value and the
+# remaining rows are the values whose pairwise distinctness it represents.
+# Implement the equivalence natively instead of using MOI's
+# AllDifferent -> CountDistinct -> MILP bridge chain.
+function MOI.supports_constraint(
+    ::Optimizer,
+    ::Type{MOI.VectorOfVariables},
+    ::Type{MOI.Reified{MOI.AllDifferent}},
+)
+    return true
+end
+
+function MOI.supports_add_constrained_variables(
+    ::Optimizer,
+    ::Type{MOI.Reified{MOI.AllDifferent}},
+)
+    return false
+end
+
+function MOI.add_constraint(
+    m::Optimizer,
+    f::MOI.VectorOfVariables,
+    s::MOI.Reified{MOI.AllDifferent},
+)
+    length(f.variables) == MOI.dimension(s) || error(
+        "Hexaly Reified(AllDifferent) expected $(MOI.dimension(s)) variables; " *
+        "got $(length(f.variables)).",
+    )
+    truth = _expression!(m, first(f.variables))
+    values = MOI.VectorOfVariables(f.variables[2:end])
+    all_different = _build_constraint(m, values, s.set)
+    expr = eq(m.model, truth, all_different)
+    _add_hexaly_constraint!(m, expr)
+    index = MOI.ConstraintIndex{typeof(f),typeof(s)}(
+        length(m.constraint_info) + 1,
+    )
+    m.constraint_info[index] = ConstraintInfo(index, expr, f, s)
+    return index
 end
 
 # Circuit — encoded via a reachability formulation. See the original Python
