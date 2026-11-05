@@ -72,6 +72,7 @@ function MOI.add_constraint(
         m, f, MOI.dimension(s), "MathOptVRP.SumGetIndex",
     )
     terms = HxExpression[
+        isone(s.values[i]) ? contains_(m.model, route, i - 1) :
         prod(m.model, s.values[i], contains_(m.model, route, i - 1))
         for i in eachindex(s.values) if !iszero(s.values[i])
     ]

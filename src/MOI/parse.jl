@@ -12,6 +12,12 @@ function _build_linear_expression(
     f::MOI.ScalarAffineFunction{T},
 ) where {T<:Real}
     f = MOI.Utilities.canonical(f)
+    if !(T <: Integer) && isinteger(f.constant) &&
+       all(t -> isinteger(t.coefficient), f.terms)
+        # Integer coefficients keep integer expressions, such as costs scaled
+        # to integer units, in Hexaly's integer arithmetic.
+        return _build_linear_expression(m, convert(MOI.ScalarAffineFunction{Int}, f))
+    end
     md = m.model
     term_exprs = HxExpression[]
     for t in f.terms

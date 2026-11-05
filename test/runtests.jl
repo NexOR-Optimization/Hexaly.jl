@@ -71,5 +71,6 @@ const HAS_LICENSE = Hexaly.has_license()
         # and are run through `MathOptVRP.Tests.runtests` here with a
         # Hexaly-specific route reader. See `test/jump.jl` for that wiring.
         include("jump.jl")
+        include("vehicle_schedule.jl")
     end
 end

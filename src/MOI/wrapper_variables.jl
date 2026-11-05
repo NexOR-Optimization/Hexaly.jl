@@ -76,8 +76,20 @@ function _define_expression!(
     info.variable = expression
     info.is_defined = true
     !isempty(info.name) && set_name!(expression, info.name)
+    # The bounds received before the definition still constrain it.
+    if !info.is_binary
+        if info.lb !== nothing
+            _add_hexaly_constraint!(m, geq(m.model, expression, _bound(info, info.lb)))
+        end
+        if info.ub !== nothing
+            _add_hexaly_constraint!(m, leq(m.model, expression, _bound(info, info.ub)))
+        end
+    end
     return
 end
+
+_bound(info::VariableInfo, value::Float64) =
+    info.is_integer && isinteger(value) ? Int(value) : value
 
 _new_int(m::Optimizer, lb::Int, ub::Int) = int!(m.model, lb, ub)
 _new_float(m::Optimizer, lb::Real, ub::Real) =

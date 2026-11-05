@@ -76,6 +76,7 @@ include("MOI/wrapper_constraints_cp.jl")
 include("MOI/list.jl")
 include("MOI/time_windows.jl")
 include("MOI/defined_route_values.jl")
+include("MOI/vehicle_schedule.jl")
 include("MOI/sum_distances_objective.jl")
 include("MOI/copy_to.jl")
 
