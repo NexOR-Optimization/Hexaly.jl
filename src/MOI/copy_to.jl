@@ -4,6 +4,8 @@
 
 _is_definition_set(::Type{<:MathOptVRP.IsEmpty}) = true
 _is_definition_set(::Type{<:MathOptVRP.SumGetIndex}) = true
+_is_definition_set(::Type{<:MathOptVRP.SumDistances}) = true
+_is_definition_set(::Type{<:MathOptVRP.VehicleSchedule}) = true
 _is_definition_set(::Type) = false
 
 function _copy_priority(::Type{MOI.ConstraintIndex{F,S}}) where {F,S}
@@ -26,6 +28,7 @@ function MOI.copy_to(dest::Optimizer, src::MOI.ModelLike)
         MOI.Utilities._copy_variables_with_set(dest, src)
 
     MOI.Utilities.pass_attributes(dest, src, index_map, vis_src)
+    _schedule_referenced!(dest, src, index_map)
 
     # Preserve default_copy_to's constrained-variable handling. Only reorder
     # the constraints it did not use as variable constructors.
@@ -62,3 +65,59 @@ function MOI.copy_to(dest::Optimizer, src::MOI.ModelLike)
     MOI.Utilities.final_touch(dest, index_map)
     return index_map
 end
+
+# The variables read by a constraint other than a definition, by a lower
+# bound, or by the objective. Upper bounds and integrality hold for the
+# earliest schedule whenever they hold for a later one, so they do not count.
+function _schedule_referenced!(dest::Optimizer, src::MOI.ModelLike, index_map)
+    referenced = dest.schedule_referenced
+    empty!(referenced)
+    add(f) = for vi in _variables(f)
+        push!(referenced, index_map[vi])
+    end
+    for (F, S) in MOI.get(src, MOI.ListOfConstraintTypesPresent())
+        _is_definition_set(S) && continue
+        if F == MOI.VariableIndex
+            S <: Union{MOI.LessThan,MOI.Integer,MOI.ZeroOne} && continue
+        end
+        for ci in MOI.get(src, MOI.ListOfConstraintIndices{F,S}())
+            if F == MOI.VariableIndex && !_has_positive_lower(
+                MOI.get(src, MOI.ConstraintSet(), ci))
+                continue
+            end
+            add(MOI.get(src, MOI.ConstraintFunction(), ci))
+        end
+    end
+    F = MOI.get(src, MOI.ObjectiveFunctionType())
+    if F !== nothing
+        add(MOI.get(src, MOI.ObjectiveFunction{F}()))
+    end
+    return
+end
+
+_has_positive_lower(s::MOI.GreaterThan) = s.lower > 0
+_has_positive_lower(s::MOI.EqualTo) = s.value > 0
+_has_positive_lower(s::MOI.Interval) = s.lower > 0
+_has_positive_lower(::MOI.AbstractSet) = true
+
+_variables(f::MOI.VariableIndex) = (f,)
+_variables(f::MOI.VectorOfVariables) = f.variables
+_variables(f::Union{MOI.ScalarAffineFunction,MOI.ScalarQuadraticFunction}) =
+    (t.variable for t in f.terms)
+_variables(f::MOI.VectorAffineFunction) = (t.scalar_term.variable for t in f.terms)
+function _variables(f::MOI.ScalarNonlinearFunction)
+    result = MOI.VariableIndex[]
+    stack = Any[f]
+    while !isempty(stack)
+        arg = pop!(stack)
+        if arg isa MOI.ScalarNonlinearFunction
+            append!(stack, arg.args)
+        elseif arg isa MOI.AbstractFunction
+            append!(result, _variables(arg))
+        elseif arg isa AbstractVector
+            append!(stack, arg)
+        end
+    end
+    return result
+end
+_variables(::Any) = ()

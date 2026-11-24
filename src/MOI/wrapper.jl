@@ -87,6 +87,10 @@ mutable struct Optimizer <: MOI.AbstractOptimizer
     primal_status::MOI.ResultStatusCode
     raw_status_string::String
     solved::Bool
+    # The variables that a constraint or the objective reads besides the
+    # definitions of MathOptVRP sets. A `VehicleSchedule` lets the visits
+    # whose start time is among them wait.
+    schedule_referenced::Set{MOI.VariableIndex}
 
     function Optimizer()
         m = new()
@@ -106,6 +110,7 @@ mutable struct Optimizer <: MOI.AbstractOptimizer
         m.primal_status = MOI.NO_SOLUTION
         m.raw_status_string = ""
         m.solved = false
+        m.schedule_referenced = Set{MOI.VariableIndex}()
         return m
     end
 end
@@ -125,6 +130,7 @@ function MOI.empty!(m::Optimizer)
     m.primal_status = MOI.NO_SOLUTION
     m.raw_status_string = ""
     m.solved = false
+    empty!(m.schedule_referenced)
     return
 end
 
